@@ -25,6 +25,21 @@ def test_read_csv(tmp_path: Path) -> None:
     assert io.read_items(str(csv_path)) == ["alpha", "beta"]
 
 
+def test_read_csv_composite_columns(tmp_path: Path) -> None:
+    csv_path = tmp_path / "connections.csv"
+    csv_path.write_text(
+        "module,instance,pin\n"
+        "fabric,cache0/bank0,req_in\n"
+        "fabric,cache0/bank1,req_out\n"
+        "fabric,cache1/bank0,data_in\n"
+    )
+    assert io.read_items(str(csv_path)) == [
+        "fabric/cache0/bank0/req_in",
+        "fabric/cache0/bank1/req_out",
+        "fabric/cache1/bank0/data_in",
+    ]
+
+
 def test_load_and_save_solution(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "solution.json"
     payload = {"expr": "P1", "atoms": []}

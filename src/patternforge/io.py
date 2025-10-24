@@ -36,9 +36,29 @@ def _read_jsonl(handle: TextIO) -> list[str]:
 
 def _read_csv(handle: TextIO, column: str = "item") -> list[str]:
     reader = csv.DictReader(handle)
-    if column not in reader.fieldnames if reader.fieldnames else []:
-        raise ValueError(f"CSV missing required column '{column}'")
-    return [row[column] for row in reader if row.get(column)]
+    fieldnames = reader.fieldnames or []
+    if column in fieldnames:
+        return [row[column] for row in reader if row.get(column)]
+
+    # Fallback: compose a hierarchical path from common field names.
+    join_fields = [
+        name for name in ("module", "instance", "pin", "signal") if name in fieldnames
+    ]
+    if not join_fields:
+        raise ValueError(
+            "CSV missing required column 'item' and no supported composite columns were found"
+        )
+
+    items: list[str] = []
+    for row in reader:
+        components: list[str] = []
+        for name in join_fields:
+            value = row.get(name, "")
+            if value:
+                components.append(str(value).strip())
+        if components:
+            items.append("/".join(components))
+    return items
 
 
 def _open_path(path: str) -> Iterable[str]:
