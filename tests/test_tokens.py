@@ -1,6 +1,6 @@
 """Tokenization tests."""
 
-from codex.engine import tokens
+from patternforge.engine import tokens
 
 
 def test_tokenize_classchange() -> None:

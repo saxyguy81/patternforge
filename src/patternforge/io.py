@@ -1,4 +1,4 @@
-"""Input/output helpers for the codex CLI."""
+"""Input/output helpers for the patternforge CLI."""
 import csv
 import json
 import os

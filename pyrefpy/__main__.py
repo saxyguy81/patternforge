@@ -14,7 +14,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "paths",
         nargs="*",
-        default=["codex"],
+        default=["patternforge"],
         help="files or directories to inspect",
     )
     parser.add_argument("--quiet", action="store_true", help="suppress success output")

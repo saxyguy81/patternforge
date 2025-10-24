@@ -1,7 +1,7 @@
 """Tests for IDF computation."""
 
-from codex.engine.idf import compute_idf
-from codex.engine.tokens import Token
+from patternforge.engine.idf import compute_idf
+from patternforge.engine.tokens import Token
 
 
 def test_compute_idf() -> None:

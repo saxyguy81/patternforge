@@ -2,14 +2,14 @@
 
 import pytest
 
-from codex.engine.models import (
+from patternforge.engine.models import (
     InvertStrategy,
     OptimizeBudgets,
     OptimizeWeights,
     QualityMode,
     SolveOptions,
 )
-from codex.engine.solver import evaluate_expr, propose_solution
+from patternforge.engine.solver import evaluate_expr, propose_solution
 
 
 def _options(invert: InvertStrategy = InvertStrategy.NEVER) -> SolveOptions:

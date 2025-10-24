@@ -1,4 +1,4 @@
-"""End-to-end CLI tests executed directly via :func:`codex.cli.main`."""
+"""End-to-end CLI tests executed directly via :func:`patternforge.cli.main`."""
 
 import argparse
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from codex import cli
+from patternforge import cli
 
 
 def _write(path: Path, text: str) -> Path:
@@ -91,13 +91,13 @@ def test_cli_evaluate_explain_and_summarize(
     assert "covers" in summary
 
 
-def test_codex_main_entrypoint(
+def test_patternforge_main_entrypoint(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     include = _write(tmp_path / "include.txt", "alpha/module1\n")
-    from codex import main as codex_main
+    from patternforge import main as patternforge_main
 
-    codex_main([
+    patternforge_main([
         "propose",
         "--include",
         str(include),
@@ -196,7 +196,7 @@ def test_cli_rectangles_text(
 
 
 def test_parse_invert_errors() -> None:
-    from codex.cli import _parse_invert
+    from patternforge.cli import _parse_invert
 
     with pytest.raises(argparse.ArgumentTypeError):
         # argparse.ArgumentTypeError derives from ValueError

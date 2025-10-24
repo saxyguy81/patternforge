@@ -1,4 +1,4 @@
-"""Explanation helpers for codex solutions."""
+"""Explanation helpers for patternforge solutions."""
 from __future__ import annotations
 
 from collections.abc import Sequence

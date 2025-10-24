@@ -1,6 +1,6 @@
 """Tests for data models."""
 
-from codex.engine.models import InvertStrategy, QualityMode, SolveOptions
+from patternforge.engine.models import InvertStrategy, QualityMode, SolveOptions
 
 
 def test_solve_options_for_inversion() -> None:

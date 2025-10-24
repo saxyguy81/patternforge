@@ -1,6 +1,6 @@
 """Tests for rectangle planner."""
 
-from codex.engine.rectangles import plan_rectangles
+from patternforge.engine.rectangles import plan_rectangles
 
 
 def test_plan_rectangles_counts() -> None:

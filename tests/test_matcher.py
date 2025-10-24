@@ -2,7 +2,7 @@
 
 import pytest
 
-from codex.engine.matcher import match_all, match_pattern, ordered_match, wildcard_count
+from patternforge.engine.matcher import match_all, match_pattern, ordered_match, wildcard_count
 
 
 @pytest.mark.parametrize(

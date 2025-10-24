@@ -1,6 +1,6 @@
-"""Tests for :mod:`codex.engine.bitset`."""
+"""Tests for :mod:`patternforge.engine.bitset`."""
 
-from codex.engine import bitset
+from patternforge.engine import bitset
 
 
 def test_bitset_operations() -> None:

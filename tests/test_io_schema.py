@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from codex import io
-from codex.schema import FieldSchema, load_schema, schema_from_flags
+from patternforge import io
+from patternforge.schema import FieldSchema, load_schema, schema_from_flags
 
 
 def test_read_text_and_jsonl(tmp_path: Path) -> None:

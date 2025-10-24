@@ -1,4 +1,4 @@
-"""Data models shared across the codex engine."""
+"""Data models shared across the patternforge engine."""
 from __future__ import annotations
 
 import enum

@@ -1,6 +1,6 @@
 """Tests for candidate generation."""
 
-from codex.engine.candidates import generate_candidates
+from patternforge.engine.candidates import generate_candidates
 
 
 def test_generate_candidates_basic() -> None:

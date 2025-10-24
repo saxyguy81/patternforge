@@ -14,4 +14,4 @@ ignore = ["S101"]
 
 [tool.coverage.run]
 branch = true
-source = ["codex", "pyrefpy"]
+source = ["patternforge", "pyrefpy"]

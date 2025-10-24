@@ -1,4 +1,4 @@
-"""Command line interface for the codex pattern tool."""
+"""Command line interface for the patternforge pattern tool."""
 from __future__ import annotations
 
 import argparse
@@ -39,8 +39,8 @@ def _parse_invert(value: str) -> InvertStrategy:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="codex", description="Pattern discovery CLI")
-    parser.add_argument("-V", "--version", action="version", version="codex 0.1")
+    parser = argparse.ArgumentParser(prog="patternforge", description="Pattern discovery CLI")
+    parser.add_argument("-V", "--version", action="version", version="patternforge 0.1")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common_options(cmd: argparse.ArgumentParser) -> None:

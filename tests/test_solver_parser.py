@@ -2,7 +2,7 @@
 
 import pytest
 
-from codex.engine.solver import _ExprParser
+from patternforge.engine.solver import _ExprParser
 
 
 def test_parser_valid_expression() -> None:

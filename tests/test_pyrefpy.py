@@ -10,14 +10,14 @@ from pyrefpy import __main__ as pyrefpy_main
 from pyrefpy import check_file, check_paths
 
 
-def test_check_paths_codex_is_clean() -> None:
-    issues = check_paths(["codex"])
+def test_check_paths_patternforge_is_clean() -> None:
+    issues = check_paths(["patternforge"])
     assert not issues
 
 
 def test_cli_invocation() -> None:
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "pyrefpy", "codex", "--quiet"],
+        [sys.executable, "-m", "pyrefpy", "patternforge", "--quiet"],
         capture_output=True,
         text=True,
     )
@@ -25,7 +25,7 @@ def test_cli_invocation() -> None:
 
 
 def test_main_entrypoint() -> None:
-    assert pyrefpy_main.main(["codex", "--quiet"]) == 0
+    assert pyrefpy_main.main(["patternforge", "--quiet"]) == 0
 
 
 def test_check_file_reports_missing(tmp_path: Path) -> None:

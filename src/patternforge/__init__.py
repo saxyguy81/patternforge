@@ -1,4 +1,4 @@
-"""codex pattern discovery toolkit."""
+"""patternforge pattern discovery toolkit."""
 
 from collections.abc import Sequence
 
@@ -6,7 +6,7 @@ from .engine.solver import evaluate_expr, propose_solution
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point mirroring :func:`codex.cli.main`."""
+    """Entry point mirroring :func:`patternforge.cli.main`."""
 
     from .cli import main as cli_main
 

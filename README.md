@@ -28,7 +28,7 @@ compute/memory/cache0
 compute/memory/cache1
 DATA
 
-python -m codex.cli plan-rectangles \
+python -m patternforge.cli plan-rectangles \
   --include rectangles.txt \
   --rect-budget 2 \
   --rect-penalty 1.5 \
@@ -63,7 +63,7 @@ regress/nightly/ipC/test_spi/pass
 regress/nightly/ipC/test_i2c/pass
 PASS
 
-python -m codex.cli propose \
+python -m patternforge.cli propose \
   --include regress_failed.txt \
   --exclude regress_passed.txt \
   --mode APPROX \
@@ -71,7 +71,7 @@ python -m codex.cli propose \
   --emit-witnesses \
   --out regress_solution.json
 
-python -m codex.cli explain --solution regress_solution.json --format json
+python -m patternforge.cli explain --solution regress_solution.json --format json
 ```
 
 The solver finds a single atom `*fail*`, explains that it covers every failure, and lists true-positive
@@ -110,7 +110,7 @@ cat <<'SCHEMA' > fabric_schema.json
 {"name": "fabric_path", "delimiter": "/", "fields": ["domain", "block", "subblock", "instance", "pin"]}
 SCHEMA
 
-python -m codex.cli propose \
+python -m patternforge.cli propose \
   --include fabric_cache_include.txt \
   --exclude fabric_cache_exclude.txt \
   --schema fabric_schema.json \
@@ -136,5 +136,5 @@ shows near-linear scaling while keeping runtimes well under a second:
 | 500          | 0.200       | 1     | 167 | 0 |
 | 1000         | 0.200       | 1     | 334 | 0 |
 
-These timings come from invoking `codex propose` with randomly generated hierarchical paths and recording
+These timings come from invoking `patternforge propose` with randomly generated hierarchical paths and recording
 process CPU time (see `python - <<'PY' ...` in the repository history for the exact script).【4c0d3c†L1-L6】

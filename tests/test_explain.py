@@ -1,6 +1,6 @@
 """Tests for explanation helpers."""
 
-from codex.engine.explain import explain_dict, explain_text, summarize_text
+from patternforge.engine.explain import explain_dict, explain_text, summarize_text
 
 
 def sample_solution() -> dict:
