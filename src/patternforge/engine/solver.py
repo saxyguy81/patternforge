@@ -349,6 +349,7 @@ def _make_solution(
                         "expr": f"{a.id} & {b.id}",
                         "raw_expr": f"({a.text}) & ({b.text})",
                         "field": a.field or b.field,
+                        "fields": {k: v for k, v in ((a.field, a.text), (b.field, b.text)) if k},
                         "tp": best_in.bit_count(),
                         "fp": best_ex.bit_count(),
                         "fn": len(include) - best_in.bit_count(),
@@ -369,6 +370,7 @@ def _make_solution(
                         "expr": atom.id,
                         "raw_expr": atom.text,
                         "field": atom.field,
+                        "fields": ({atom.field: atom.text} if atom.field else {}),
                         "tp": in_m.bit_count(),
                         "fp": ex_m.bit_count(),
                         "fn": len(include) - in_m.bit_count(),
@@ -388,6 +390,7 @@ def _make_solution(
                     "expr": atom.id,
                     "raw_expr": atom.text,
                     "field": atom.field,
+                    "fields": ({atom.field: atom.text} if atom.field else {}),
                     "tp": in_m.bit_count(),
                     "fp": ex_m.bit_count(),
                     "fn": len(include) - in_m.bit_count(),
@@ -467,9 +470,21 @@ def _make_solution(
             if added >= 2:
                 break
 
+    # Promote terms' field maps into final expression (OR of per-term conjunctions)
+    def term_to_text(term: dict[str, object]) -> str:
+        fields = term.get("fields") or {}
+        if isinstance(fields, dict) and fields:
+            parts = []
+            for _, pat in fields.items():
+                parts.append(f"({pat})")
+            return " & ".join(parts)
+        # fallback to raw_expr
+        return str(term.get("raw_expr", "FALSE"))
+    expr_text = " | ".join(term_to_text(t) for t in terms) if terms else "FALSE"
+
     return Solution(
-        expr=expr,
-        raw_expr=raw_expr,
+        expr=expr_text,
+        raw_expr=expr_text,
         global_inverted=inverted,
         term_method=("subtractive" if inverted else "additive"),
         mode=options.mode.value,
@@ -601,9 +616,14 @@ def propose_solution_structured(
 
 
 def _eval_atom(pattern: str, dataset: Sequence[str]) -> int:
+    def _matches(text: str, pat: str) -> bool:
+        if "&" in pat:
+            parts = [p.strip().strip("()") for p in pat.split("&")]
+            return all(matcher.match_pattern(text, p) for p in parts if p)
+        return matcher.match_pattern(text, pat)
     mask = 0
     for idx, item in enumerate(dataset):
-        if matcher.match_pattern(item, pattern):
+        if _matches(item, pattern):
             mask |= 1 << idx
     return mask
 

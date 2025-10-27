@@ -738,3 +738,78 @@ terms:
 Notes
 - Atoms in structured mode carry a `field` key; matching and coverage use only that field’s value.
 - If an atom’s `field` is not explicitly set, the solver attributes it to the most likely field based on substring hits.
+
+### Structured JSONL (module/instance/pin)
+
+Use JSONL inputs to model rows with multiple fields. Values may contain any characters; discovered field patterns can include zero or more wildcards (for example, `*cache*bank*`). Omitted fields are treated as wildcard.
+
+Create JSONL inputs:
+
+```bash
+cat > include_rows.jsonl <<'IN'
+{"module":"fabric_cache","instance":"cache0/bank0","pin":"data_in"}
+{"module":"fabric_cache","instance":"cache0/bank1","pin":"data_out"}
+{"module":"fabric_cache","instance":"cache1/bank2","pin":"data_in"}
+{"module":"fabric_cache","instance":"cache1/bank3","pin":"data_out"}
+IN
+
+cat > exclude_rows.jsonl <<'EX'
+{"module":"fabric_router","instance":"rt0/core0","pin":"req"}
+{"module":"fabric_router","instance":"rt0/core1","pin":"grant"}
+{"module":"fabric_cache","instance":"cache_dbg/trace","pin":"tag"}
+EX
+```
+
+Run a short Python snippet to produce structured terms (fields ANDed within each term, ORed across terms):
+
+```bash
+PYTHONPATH=src python - <<'PY'
+import json
+from patternforge.engine.models import SolveOptions, QualityMode
+from patternforge.engine.solver import propose_solution_structured
+from patternforge.engine.tokens import make_split_tokenizer, iter_structured_tokens_with_fields
+
+def load_jsonl(path):
+    rows = []
+    with open(path, encoding='utf-8') as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+include_rows = load_jsonl('include_rows.jsonl')
+exclude_rows = load_jsonl('exclude_rows.jsonl')
+
+tk = make_split_tokenizer('classchange', min_token_len=3)
+fts = {'module': tk, 'instance': tk, 'pin': tk}
+tok_iter = list(iter_structured_tokens_with_fields(include_rows, fts, field_order=['module','instance','pin']))
+opts = SolveOptions(mode=QualityMode.EXACT, allow_complex_terms=True)
+sol = propose_solution_structured(include_rows, exclude_rows, opts, token_iter=tok_iter)
+
+# Emit only structured terms (fields + metrics)
+terms = [
+  {
+    'fields': t.get('fields', {}),
+    'tp': t.get('tp', 0), 'fp': t.get('fp', 0), 'fn': t.get('fn', 0),
+    'residual_tp': t.get('residual_tp', 0), 'residual_fp': t.get('residual_fp', 0),
+    'length': t.get('length', 0)
+  }
+  for t in sol.get('terms', [])
+]
+print(json.dumps({'expr': sol['expr'], 'terms': terms}, indent=2))
+PY
+```
+
+Example structured terms (YAML):
+
+```yaml
+expr: "(*fabric*) & (*data*) | (*cache*) & (*data*) | (*data*)"
+terms:
+  - {fields: {module: "*fabric*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 0, residual_fp: 0, length: 10}
+  - {fields: {module: "*cache*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 0, residual_fp: 0, length: 9}
+  - {fields: {pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 4, residual_fp: 0, length: 4}
+```
+
+CLI tip
+- The `propose` command supports `--structured-terms` to emit only structured terms when outputting JSON, but it expects you to use the Python API for structured rows. Use the snippet above for end-to-end JSONL workflows.

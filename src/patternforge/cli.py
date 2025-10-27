@@ -98,6 +98,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     propose = sub.add_parser("propose", help="propose a new expression")
     add_common_options(propose)
+    propose.add_argument("--structured-terms", dest="structured_terms", action="store_true", default=False,
+                        help="Emit structured terms (fields + metrics) instead of full solution when --format json")
 
     evaluate = sub.add_parser("evaluate", help="evaluate an expression")
     evaluate.add_argument("--include", required=True)
@@ -211,6 +213,22 @@ def _command_propose(args: argparse.Namespace) -> None:
     items = io.ensure_items(args.include, args.exclude)
     options = _build_options(args)
     solution = propose_solution(items.include, items.exclude, options)
+    if args.structured_terms and args.format == "json":
+        terms = solution.get("terms", [])
+        payload = [
+            {
+                "fields": t.get("fields", {}),
+                "tp": t.get("tp", 0),
+                "fp": t.get("fp", 0),
+                "fn": t.get("fn", 0),
+                "residual_tp": t.get("residual_tp", 0),
+                "residual_fp": t.get("residual_fp", 0),
+                "length": t.get("length", 0),
+            }
+            for t in terms
+        ]
+        io.write_json({"terms": payload}, args.out)
+        return
     if args.emit_witnesses:
         witnesses = solution.setdefault("witnesses", {})
         witnesses.setdefault("tp_examples", [])
@@ -239,8 +257,16 @@ def _command_evaluate(args: argparse.Namespace) -> None:
         atom_list = atom_payload
     else:
         raise ValueError("atoms file must contain a list or an object with an 'atoms' key")
-    atoms = {atom["id"]: atom["text"] for atom in atom_list}
-    metrics = evaluate_expr(args.expr, atoms, include, exclude)
+    # If expr references raw patterns instead of Pi atoms, map each top-level OR term to Pi
+    expr = args.expr
+    if "P" not in expr:
+        # naive split on '|'; safe because our solver emits ' | ' between term conjunctions
+        parts = [p.strip() for p in expr.split("|") if p.strip()]
+        atoms = {f"P{i+1}": part for i, part in enumerate(parts)}
+        expr = " | ".join(atoms.keys()) if atoms else "FALSE"
+    else:
+        atoms = {atom["id"]: atom["text"] for atom in atom_list}
+    metrics = evaluate_expr(expr, atoms, include, exclude)
     if args.format == "json":
         io.write_json(metrics, "-")
     else:
