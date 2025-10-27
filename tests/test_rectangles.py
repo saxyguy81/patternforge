@@ -9,3 +9,7 @@ def test_plan_rectangles_counts() -> None:
     assert plan["total"] == 4
     prefixes = {rect["prefix"] for rect in plan["rectangles"]}
     assert prefixes == {"alpha", "beta"}
+    # New fields: ensure they exist and are coherent
+    for rect in plan["rectangles"]:
+        assert rect["pattern"].startswith(rect["prefix"]) and rect["pattern"].endswith("*")
+        assert rect["kind"] == "prefix"

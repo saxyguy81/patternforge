@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from . import matcher
 from .candidates import generate_candidates
+from .tokens import Token
 from .models import Atom, Candidate, InvertStrategy, Solution, SolveOptions
 
 
@@ -21,6 +22,10 @@ class _Context:
     include: Sequence[str]
     exclude: Sequence[str]
     options: SolveOptions
+    token_iter: list[tuple[int, Token]] | None = None
+    include_rows: Sequence[object] | None = None
+    exclude_rows: Sequence[object] | None = None
+    field_getter: callable | None = None
 
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
@@ -70,17 +75,28 @@ def _build_candidates(ctx: _Context) -> list[Candidate]:
         per_word_substrings=ctx.options.per_word_substrings,
         per_word_multi=ctx.options.per_word_multi,
         max_multi_segments=ctx.options.max_multi_segments,
+        token_iter=ctx.token_iter,
     )
     candidates: list[Candidate] = []
     limit = ctx.options.budgets.max_candidates
-    for pattern, kind, score in generated[:limit]:
+    for pattern, kind, score, field in generated[:limit]:
         include_bits = 0
         exclude_bits = 0
         for idx, text in enumerate(ctx.include):
-            if matcher.match_pattern(text, pattern):
+            if field and ctx.include_rows is not None and ctx.field_getter is not None:
+                value = str(ctx.field_getter(ctx.include_rows[idx], field))
+                matched = matcher.match_pattern(value, pattern)
+            else:
+                matched = matcher.match_pattern(text, pattern)
+            if matched:
                 include_bits |= 1 << idx
         for idx, text in enumerate(ctx.exclude):
-            if matcher.match_pattern(text, pattern):
+            if field and ctx.exclude_rows is not None and ctx.field_getter is not None:
+                value = str(ctx.field_getter(ctx.exclude_rows[idx], field)) if idx < len(ctx.exclude_rows) else ""
+                matched = matcher.match_pattern(value, pattern)
+            else:
+                matched = matcher.match_pattern(text, pattern)
+            if matched:
                 exclude_bits |= 1 << idx
         candidates.append(
             Candidate(
@@ -91,6 +107,7 @@ def _build_candidates(ctx: _Context) -> list[Candidate]:
                 exclude_bits=exclude_bits,
                 wildcards=pattern.count("*"),
                 length=len(pattern.replace("*", "")),
+                field=field,
             )
         )
     return candidates
@@ -117,7 +134,23 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
             gain = selection.include_bits.bit_count()
             new_gain = new_include_bits.bit_count()
             if trial_cost < best_candidate_cost or (
-                trial_cost == best_candidate_cost and new_gain > gain
+                trial_cost == best_candidate_cost and (
+                    new_gain > gain
+                    or (
+                        new_gain == gain
+                        and (
+                            # tie-break by specificity: fewer wildcards, then longer length
+                            (
+                                best_candidate is None
+                                or candidate.wildcards < best_candidate.wildcards
+                                or (
+                                    candidate.wildcards == best_candidate.wildcards
+                                    and candidate.length > best_candidate.length
+                                )
+                            )
+                        )
+                    )
+                )
             ):
                 best_candidate_cost = trial_cost
                 best_candidate = candidate
@@ -151,6 +184,7 @@ def _atoms_from_selection(selection: _Selection) -> list[Atom]:
                 kind=candidate.kind,
                 wildcards=candidate.wildcards,
                 length=candidate.length,
+                field=candidate.field,
             )
         )
     return atoms
@@ -159,6 +193,11 @@ def _atoms_from_selection(selection: _Selection) -> list[Atom]:
 def _evaluate_atoms(
     atoms: list[Atom], include: Sequence[str], exclude: Sequence[str]
 ) -> tuple[int, int, int, dict[str, dict[str, int]]]:
+    def _matches(text: str, pattern: str) -> bool:
+        if "&" in pattern:
+            parts = [p.strip().strip("()") for p in pattern.split("&")]
+            return all(matcher.match_pattern(text, p) for p in parts if p)
+        return matcher.match_pattern(text, pattern)
     include_mask = 0
     exclude_mask = 0
     per_atom: dict[str, dict[str, int]] = {}
@@ -166,10 +205,10 @@ def _evaluate_atoms(
         mask_in = 0
         mask_ex = 0
         for idx, text in enumerate(include):
-            if matcher.match_pattern(text, atom.text):
+            if _matches(text, atom.text):
                 mask_in |= 1 << idx
         for idx, text in enumerate(exclude):
-            if matcher.match_pattern(text, atom.text):
+            if _matches(text, atom.text):
                 mask_ex |= 1 << idx
         include_mask |= mask_in
         exclude_mask |= mask_ex
@@ -216,6 +255,12 @@ def _make_solution(
         fp = fp_expr
         fn = fn_expr
     expr = " | ".join(atom.id for atom in atoms) if atoms else "FALSE"
+    raw_expr = " | ".join(atom.text for atom in atoms) if atoms else "FALSE"
+    def _matches(text: str, pattern: str) -> bool:
+        if "&" in pattern:
+            parts = [p.strip().strip("()") for p in pattern.split("&")]
+            return all(matcher.match_pattern(text, p) for p in parts if p)
+        return matcher.match_pattern(text, pattern)
     witnesses = {"tp_examples": [], "fp_examples": [], "fn_examples": []}
     dataset_pos = include
     dataset_neg = exclude
@@ -223,10 +268,10 @@ def _make_solution(
     mask_neg = 0
     for atom in atoms:
         for idx, text in enumerate(dataset_pos):
-            if matcher.match_pattern(text, atom.text):
+            if _matches(text, atom.text):
                 mask_pos |= 1 << idx
         for idx, text in enumerate(dataset_neg):
-            if matcher.match_pattern(text, atom.text):
+            if _matches(text, atom.text):
                 mask_neg |= 1 << idx
     for idx, text in enumerate(dataset_pos):
         covered = bool(mask_pos & (1 << idx))
@@ -256,9 +301,177 @@ def _make_solution(
         "wildcards": sum(atom.wildcards for atom in atoms),
         "pattern_chars": sum(atom.length for atom in atoms),
     }
+    # Build top-level terms (OR of atoms, possibly conjunctions when enabled)
+    terms: list[dict[str, object]] = []
+    # Precompute per-atom masks to enable residual stats and potential conjunctions
+    masks_in: list[int] = []
+    masks_ex: list[int] = []
+    for atom in atoms:
+        mask_in = 0
+        mask_ex = 0
+        for idx, text in enumerate(include):
+            if _matches(text, atom.text):
+                mask_in |= 1 << idx
+        for idx, text in enumerate(exclude):
+            if _matches(text, atom.text):
+                mask_ex |= 1 << idx
+        masks_in.append(mask_in)
+        masks_ex.append(mask_ex)
+    # When allowed, try to pair atoms into conjunction terms that retain TP and reduce FP
+    used = [False] * len(atoms)
+    if options.allow_complex_terms:
+        for i, atom in enumerate(atoms):
+            if used[i]:
+                continue
+            in_i = masks_in[i]
+            ex_i = masks_ex[i]
+            best = -1
+            best_fp = ex_i.bit_count()
+            for j in range(i + 1, len(atoms)):
+                if used[j]:
+                    continue
+                in_j = masks_in[j]
+                ex_j = masks_ex[j]
+                inter_in = in_i & in_j
+                inter_ex = ex_i & ex_j
+                # Only consider if preserves TP of the first while reducing FP
+                if inter_in.bit_count() == in_i.bit_count() and inter_ex.bit_count() < best_fp:
+                    best = j
+                    best_fp = inter_ex.bit_count()
+                    best_in = inter_in
+                    best_ex = inter_ex
+            if best != -1:
+                used[i] = used[best] = True
+                a = atoms[i]
+                b = atoms[best]
+                terms.append(
+                    {
+                        "expr": f"{a.id} & {b.id}",
+                        "raw_expr": f"({a.text}) & ({b.text})",
+                        "field": a.field or b.field,
+                        "tp": best_in.bit_count(),
+                        "fp": best_ex.bit_count(),
+                        "fn": len(include) - best_in.bit_count(),
+                        "length": a.length + b.length,
+                        "include_examples": [include[k] for k in range(len(include)) if (best_in >> k) & 1][:3],
+                        "exclude_examples": [exclude[k] for k in range(len(exclude)) if (best_ex >> k) & 1][:3],
+                        "_mask_in": best_in,
+                        "_mask_ex": best_ex,
+                    }
+                )
+            else:
+                # fallback single term
+                used[i] = True
+                in_m = masks_in[i]
+                ex_m = masks_ex[i]
+                terms.append(
+                    {
+                        "expr": atom.id,
+                        "raw_expr": atom.text,
+                        "field": atom.field,
+                        "tp": in_m.bit_count(),
+                        "fp": ex_m.bit_count(),
+                        "fn": len(include) - in_m.bit_count(),
+                        "length": atom.length,
+                        "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
+                        "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
+                        "_mask_in": in_m,
+                        "_mask_ex": ex_m,
+                    }
+                )
+    else:
+        for i, atom in enumerate(atoms):
+            in_m = masks_in[i]
+            ex_m = masks_ex[i]
+            terms.append(
+                {
+                    "expr": atom.id,
+                    "raw_expr": atom.text,
+                    "field": atom.field,
+                    "tp": in_m.bit_count(),
+                    "fp": ex_m.bit_count(),
+                    "fn": len(include) - in_m.bit_count(),
+                    "length": atom.length,
+                    "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
+                    "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
+                    "_mask_in": in_m,
+                    "_mask_ex": ex_m,
+                }
+            )
+        # end base-term assembly
+
+    # Residual coverage based on greedy order of atoms
+    acc_in = 0
+    acc_ex = 0
+    for term in terms:
+        term_in = term.pop("_mask_in", 0)
+        term_ex = term.pop("_mask_ex", 0)
+        new_in = term_in & (~acc_in)
+        new_ex = term_ex & (~acc_ex)
+        term["residual_tp"] = new_in.bit_count()
+        term["residual_fp"] = new_ex.bit_count()
+        acc_in |= term_in
+        acc_ex |= term_ex
+
+    # Enrich with simple token-based conjunction suggestions if enabled and none created
+    if options.allow_complex_terms:
+        import re
+
+        def simple_tokens(s: str) -> list[str]:
+            return [t.lower() for t in re.split(r"[^A-Za-z0-9]+", s) if len(t) >= 3]
+
+        tokens = sorted({t for item in include for t in simple_tokens(item)})
+        # Build masks for each token pattern *token*
+        tok_in_masks: dict[str, int] = {}
+        tok_ex_masks: dict[str, int] = {}
+        for tok in tokens[:16]:  # limit
+            pat = f"*{tok}*"
+            m_in = 0
+            m_ex = 0
+            for idx, text in enumerate(include):
+                if matcher.match_pattern(text, pat):
+                    m_in |= 1 << idx
+            for idx, text in enumerate(exclude):
+                if matcher.match_pattern(text, pat):
+                    m_ex |= 1 << idx
+            tok_in_masks[tok] = m_in
+            tok_ex_masks[tok] = m_ex
+        # Try pairs that cover many includes and reduce FP
+        added = 0
+        for i, t1 in enumerate(tokens[:16]):
+            for t2 in tokens[i + 1 : 16]:
+                inter_in = tok_in_masks[t1] & tok_in_masks[t2]
+                inter_ex = tok_ex_masks[t1] & tok_ex_masks[t2]
+                if inter_in == 0:
+                    continue
+                # prefer pairs that cover all includes and 0 FP
+                if inter_in.bit_count() == len(include) and inter_ex.bit_count() == 0:
+                    raw = f"(*{t1}*) & (*{t2}*)"
+                    terms.append(
+                        {
+                            "expr": raw,
+                            "raw_expr": raw,
+                            "tp": inter_in.bit_count(),
+                            "fp": inter_ex.bit_count(),
+                            "fn": len(include) - inter_in.bit_count(),
+                            "length": len(t1) + len(t2),
+                            "include_examples": [include[k] for k in range(len(include)) if (inter_in >> k) & 1][:3],
+                            "exclude_examples": [exclude[k] for k in range(len(exclude)) if (inter_ex >> k) & 1][:3],
+                            "residual_tp": 0,
+                            "residual_fp": 0,
+                        }
+                    )
+                    added += 1
+                if added >= 2:
+                    break
+            if added >= 2:
+                break
+
     return Solution(
         expr=expr,
+        raw_expr=raw_expr,
         global_inverted=inverted,
+        term_method=("subtractive" if inverted else "additive"),
         mode=options.mode.value,
         options={
             "mode": options.mode.value,
@@ -268,13 +481,17 @@ def _make_solution(
         atoms=atoms,
         metrics=metrics,
         witnesses=witnesses,
+        terms=terms,
     )
 
 
 def propose_solution(
-    include: Sequence[str], exclude: Sequence[str], options: SolveOptions
+    include: Sequence[str],
+    exclude: Sequence[str],
+    options: SolveOptions,
+    token_iter: list[tuple[int, Token]] | None = None,
 ) -> dict[str, object]:
-    ctx = _Context(include=include, exclude=exclude, options=options)
+    ctx = _Context(include=include, exclude=exclude, options=options, token_iter=token_iter)
     candidates = _build_candidates(ctx)
     selection = _greedy_select(ctx, candidates)
     base_solution = _make_solution(include, exclude, selection, options, inverted=False)
@@ -297,6 +514,90 @@ def propose_solution(
     if options.invert == InvertStrategy.ALWAYS or inverted_cost < base_cost:
         return inverted_solution.to_json()
     return base_solution.to_json()
+
+
+def _default_field_getter(row: object, field: str) -> str:
+    if isinstance(row, dict):
+        return str(row.get(field, ""))
+    if isinstance(row, (list, tuple)):
+        if field.startswith("f") and field[1:].isdigit():
+            idx = int(field[1:])
+            return str(row[idx]) if idx < len(row) else ""
+        return ""
+    return ""
+
+
+def propose_solution_structured(
+    include_rows: Sequence[object],
+    exclude_rows: Sequence[object],
+    options: SolveOptions,
+    token_iter: list[tuple] | None = None,
+    field_getter: callable | None = None,
+) -> dict[str, object]:
+    """
+    Propose a solution over structured rows, with per-field atoms. Each atom carries a 'field'.
+    - include_rows/exclude_rows: list of dicts or tuples representing fields
+    - token_iter: expected to yield (row_index, Token, field_name) triples, e.g., from
+      tokens.iter_structured_tokens_with_fields(...)
+    - field_getter: optional function(row, field_name) -> str
+    """
+    # Build canonical strings for matching text/witnesses
+    def canon(row: object) -> str:
+        if isinstance(row, dict):
+            return "/".join(str(v) for v in row.values() if v)
+        if isinstance(row, (list, tuple)):
+            return "/".join(str(v) for v in row if v)
+        return str(row)
+
+    include = [canon(r) for r in include_rows]
+    exclude = [canon(r) for r in exclude_rows]
+
+    ctx = _Context(
+        include=include,
+        exclude=exclude,
+        options=options,
+        token_iter=token_iter,  # should carry field info
+        include_rows=include_rows,
+        exclude_rows=exclude_rows,
+        field_getter=field_getter or _default_field_getter,
+    )
+    candidates = _build_candidates(ctx)
+    selection = _greedy_select(ctx, candidates)
+    # For structured solutions, never invert automatically unless requested
+    base_solution = _make_solution(include, exclude, selection, options, inverted=False)
+    payload = base_solution.to_json()
+    # Ensure atoms carry field; if any None slipped through, attribute by substring presence
+    atoms = payload.get("atoms", [])
+    if any(a.get("field") is None for a in atoms):
+        # Build fields list per row for quick lookup
+        def row_fields(row: object) -> dict[str, str]:
+            if isinstance(row, dict):
+                return {k: str(v) for k, v in row.items()}
+            if isinstance(row, (list, tuple)):
+                return {f"f{i}": str(v) for i, v in enumerate(row)}
+            return {"f0": str(row)}
+
+        rows_fields = [row_fields(r) for r in include_rows]
+        field_names = set(n for rf in rows_fields for n in rf.keys())
+        for atom in atoms:
+            if atom.get("field") is not None:
+                continue
+            text = atom.get("text", "")
+            tokens = [t for t in text.split("*") if t]
+            best_field = None
+            best_score = -1
+            for name in field_names:
+                score = 0
+                for rf in rows_fields:
+                    fv = rf.get(name, "")
+                    for tok in tokens:
+                        if tok and tok in fv:
+                            score += 1
+                if score > best_score:
+                    best_score = score
+                    best_field = name
+            atom["field"] = best_field
+    return payload
 
 
 def _eval_atom(pattern: str, dataset: Sequence[str]) -> int:

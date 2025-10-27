@@ -4,23 +4,24 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
-from .tokens import iter_tokens
+from .tokens import Token, iter_tokens
 
 
 class CandidatePool:
     def __init__(self) -> None:
-        self._scores: dict[str, float] = {}
-        self._kinds: dict[str, str] = {}
+        self._scores: dict[tuple[str, str | None], float] = {}
+        self._kinds: dict[tuple[str, str | None], str] = {}
 
-    def push(self, pattern: str, kind: str, score: float) -> None:
-        current = self._scores.get(pattern)
+    def push(self, pattern: str, kind: str, score: float, field: str | None) -> None:
+        key = (pattern, field)
+        current = self._scores.get(key)
         if current is None or score > current:
-            self._scores[pattern] = score
-            self._kinds[pattern] = kind
+            self._scores[key] = score
+            self._kinds[key] = kind
 
-    def items(self) -> Iterable[tuple[str, str, float]]:
-        for pattern, score in self._scores.items():
-            yield pattern, self._kinds[pattern], score
+    def items(self) -> Iterable[tuple[str, str, float, str | None]]:
+        for (pattern, field), score in self._scores.items():
+            yield pattern, self._kinds[(pattern, field)], score, field
 
 
 def generate_candidates(
@@ -30,26 +31,36 @@ def generate_candidates(
     per_word_substrings: int,
     per_word_multi: int,
     max_multi_segments: int,
-) -> list[tuple[str, str, float]]:
+    token_iter: Iterable[tuple] | None = None,
+) -> list[tuple[str, str, float, str | None]]:
     pool = CandidatePool()
     token_lists: dict[int, list[str]] = defaultdict(list)
-    for idx, token in iter_tokens(include, splitmethod=splitmethod, min_token_len=min_token_len):
-        token_lists[idx].append(token.value)
-    for tokens in token_lists.values():
+    if token_iter is None:
+        token_iter = iter_tokens(include, splitmethod=splitmethod, min_token_len=min_token_len)
+    for entry in token_iter:
+        if len(entry) == 2:
+            idx, token = entry  # type: ignore[misc]
+            field = None
+        else:
+            idx, token, field = entry  # type: ignore[misc]
+        key = (idx, field)
+        token_lists[key].append(token.value)
+    for (idx_field, tokens) in token_lists.items():
+        _, field = idx_field
         for token in tokens[:per_word_substrings]:
             pattern = f"*{token}*"
             score = len(token)
-            pool.push(pattern, "substring", float(score))
+            pool.push(pattern, "substring", float(score), field)
         joined = "/".join(tokens)
         if joined:
-            pool.push(joined, "exact", float(len(joined)))
+            pool.push(joined, "exact", float(len(joined)), field)
         for token in tokens:
-            pool.push(token, "exact", float(len(token)))
+            pool.push(token, "exact", float(len(token)), field)
         if len(tokens) >= 2:
             for start in range(len(tokens)):
                 for end in range(start + 1, min(len(tokens), start + max_multi_segments) + 1):
                     segment = tokens[start:end]
                     pattern = "*" + "*".join(segment) + "*"
                     score = sum(len(t) for t in segment) - (end - start - 1)
-                    pool.push(pattern, "multi", float(score))
+                    pool.push(pattern, "multi", float(score), field)
     return sorted(pool.items(), key=lambda item: (-item[2], item[0]))

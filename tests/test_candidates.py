@@ -14,6 +14,6 @@ def test_generate_candidates_basic() -> None:
         max_multi_segments=3,
     )
     assert result
-    patterns = [pattern for pattern, _, _ in result]
+    patterns = [entry[0] for entry in result]
     assert any(pattern.startswith("*alpha") for pattern in patterns)
     assert any(pattern.endswith("gamma") for pattern in patterns)

@@ -6,6 +6,7 @@ from patternforge.engine.explain import explain_dict, explain_text, summarize_te
 def sample_solution() -> dict:
     return {
         "expr": "P1",
+        "raw_expr": "*alpha*",
         "global_inverted": False,
         "metrics": {"covered": 2, "total_positive": 2, "fp": 1, "fn": 0},
         "atoms": [
@@ -38,6 +39,7 @@ def test_explain_text() -> None:
     sol = sample_solution()
     text = explain_text(sol, ["alpha/module1", "alpha/module2"], [])
     assert "EXPR: P1" in text
+    assert "RAW:" in text
     assert "FP" in text
 
 

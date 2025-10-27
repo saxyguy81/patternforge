@@ -26,6 +26,8 @@ def plan_rectangles(
                 "prefix": prefix,
                 "count": count,
                 "score": max(count - rect_penalty, 0) * exception_weight,
+                "pattern": f"{prefix}*",
+                "kind": "prefix",
             }
         )
     return {"rectangles": rectangles, "total": len(include)}

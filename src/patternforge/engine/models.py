@@ -44,6 +44,7 @@ class SolveOptions:
     weights: OptimizeWeights = field(default_factory=OptimizeWeights)
     budgets: OptimizeBudgets = field(default_factory=OptimizeBudgets)
     allow_not_on_atoms: bool = True
+    allow_complex_terms: bool = False
     min_token_len: int = 3
     per_word_substrings: int = 16
     per_word_multi: int = 4
@@ -76,6 +77,7 @@ class Atom:
     kind: str
     wildcards: int
     length: int
+    field: str | None = None
     negated: bool = False
     tp: int | None = None
     fp: int | None = None
@@ -90,25 +92,32 @@ class Candidate:
     exclude_bits: int
     wildcards: int
     length: int
+    field: str | None = None
 
 
 @dataclass
 class Solution:
     expr: str
+    raw_expr: str | None
     global_inverted: bool
+    term_method: str
     mode: str
     options: dict[str, object]
     atoms: list[Atom]
     metrics: dict[str, int]
     witnesses: dict[str, list[str]]
+    terms: list[dict[str, object]]
 
     def to_json(self) -> dict[str, object]:
         return {
             "expr": self.expr,
+            "raw_expr": self.raw_expr,
             "global_inverted": self.global_inverted,
+            "term_method": self.term_method,
             "mode": self.mode,
             "options": self.options,
             "atoms": [atom.__dict__ for atom in self.atoms],
             "metrics": self.metrics,
             "witnesses": self.witnesses,
+            "terms": self.terms,
         }

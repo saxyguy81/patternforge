@@ -75,6 +75,17 @@ def _build_parser() -> argparse.ArgumentParser:
             default=True,
         )
         cmd.add_argument("--no-allow-not-on-atoms", dest="allow_not_on_atoms", action="store_false")
+        cmd.add_argument(
+            "--allow-complex-terms",
+            dest="allow_complex_terms",
+            action="store_true",
+            default=False,
+        )
+        cmd.add_argument(
+            "--no-allow-complex-terms",
+            dest="allow_complex_terms",
+            action="store_false",
+        )
         cmd.add_argument("--seed", type=int, default=0)
         cmd.add_argument("--threads", type=int, default=1)
         cmd.add_argument("--include", required=True)
@@ -167,6 +178,7 @@ def _build_options(args: argparse.Namespace) -> SolveOptions:
         weights=weights,
         budgets=budgets,
         allow_not_on_atoms=args.allow_not_on_atoms,
+        allow_complex_terms=args.allow_complex_terms,
         min_token_len=args.min_token_len,
         per_word_substrings=args.per_word_substrings,
         per_word_multi=args.per_word_multi,
@@ -282,13 +294,27 @@ def _command_dump_candidates(args: argparse.Namespace) -> None:
     )
     top = generated[: args.top]
     if args.format == "json":
-        payload = [
-            {"pattern": pattern, "kind": kind, "score": score}
-            for pattern, kind, score in top
-        ]
+        payload = []
+        for entry in top:
+            if len(entry) == 3:
+                pattern, kind, score = entry
+                field = None
+            else:
+                pattern, kind, score, field = entry
+            obj = {"pattern": pattern, "kind": kind, "score": score}
+            if field is not None:
+                obj["field"] = field
+            payload.append(obj)
         io.write_json(payload, "-")
     else:
-        lines = [f"{pattern}\t{kind}\t{score:.2f}" for pattern, kind, score in top]
+        lines = []
+        for entry in top:
+            if len(entry) == 3:
+                pattern, kind, score = entry
+                lines.append(f"{pattern}\t{kind}\t{score:.2f}")
+            else:
+                pattern, kind, score, field = entry
+                lines.append(f"{pattern}\t{kind}\t{score:.2f}\t{field}")
         io.write_text("\n".join(lines) + "\n", "-")
 
 
