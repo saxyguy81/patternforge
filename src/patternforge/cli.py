@@ -98,8 +98,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     propose = sub.add_parser("propose", help="propose a new expression")
     add_common_options(propose)
-    propose.add_argument("--structured-terms", dest="structured_terms", action="store_true", default=False,
-                        help="Emit structured terms (fields + metrics) instead of full solution when --format json")
+    propose.add_argument(
+        "--structured-terms",
+        dest="structured_terms",
+        action="store_true",
+        default=False,
+        help="Emit structured terms (fields + metrics) instead of full solution when --format json",
+    )
 
     evaluate = sub.add_parser("evaluate", help="evaluate an expression")
     evaluate.add_argument("--include", required=True)
@@ -110,7 +115,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     explain = sub.add_parser("explain", help="explain a saved solution")
     explain.add_argument("--solution", required=True)
-    explain.add_argument("--format", choices=["text", "json"], default="text")
+    explain.add_argument("--format", choices=["text", "json", "simple"], default="text")
 
     summarize = sub.add_parser("summarize", help="summarize a solution")
     summarize.add_argument("--solution", required=True)
@@ -221,8 +226,8 @@ def _command_propose(args: argparse.Namespace) -> None:
                 "tp": t.get("tp", 0),
                 "fp": t.get("fp", 0),
                 "fn": t.get("fn", 0),
-                "residual_tp": t.get("residual_tp", 0),
-                "residual_fp": t.get("residual_fp", 0),
+                "incremental_tp": t.get("incremental_tp", 0),
+                "incremental_fp": t.get("incremental_fp", 0),
                 "length": t.get("length", 0),
             }
             for t in terms
@@ -239,6 +244,9 @@ def _command_propose(args: argparse.Namespace) -> None:
         solution.setdefault("exclude", list(items.exclude))
     if args.format == "json":
         io.write_json(solution, args.out)
+    elif args.format == "simple":
+        text = explain_simple(solution, items.include, items.exclude)
+        io.write_text(text + "\n", args.out)
     else:
         text = explain_text(solution, items.include, items.exclude)
         io.write_text(text + "\n", args.out)
@@ -285,6 +293,9 @@ def _command_explain(args: argparse.Namespace) -> None:
     if args.format == "json":
         payload = explain_dict(solution, include, exclude)
         io.write_json(payload, "-")
+    elif args.format == "simple":
+        text = explain_simple(solution, include, exclude)
+        io.write_text(text + "\n", "-")
     else:
         text = explain_text(solution, include, exclude)
         io.write_text(text + "\n", "-")

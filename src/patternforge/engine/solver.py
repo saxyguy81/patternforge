@@ -194,10 +194,25 @@ def _evaluate_atoms(
     atoms: list[Atom], include: Sequence[str], exclude: Sequence[str]
 ) -> tuple[int, int, int, dict[str, dict[str, int]]]:
     def _matches(text: str, pattern: str) -> bool:
-        if "&" in pattern:
-            parts = [p.strip().strip("()") for p in pattern.split("&")]
-            return all(matcher.match_pattern(text, p) for p in parts if p)
-        return matcher.match_pattern(text, pattern)
+        # Support simple conjunction '&' and difference '-' (A - B) operators in raw patterns
+        def _match_piece(piece: str) -> bool:
+            piece = piece.strip()
+            if not piece:
+                return True
+            # A - B - C ... => A and not B and not C
+            minus_parts = [p.strip().strip("()") for p in piece.split("-") if p.strip()]
+            if not minus_parts:
+                return True
+            left = minus_parts[0]
+            if not matcher.match_pattern(text, left):
+                return False
+            for right in minus_parts[1:]:
+                if matcher.match_pattern(text, right):
+                    return False
+            return True
+
+        parts = [p for p in pattern.split("&")]
+        return all(_match_piece(p) for p in parts)
     include_mask = 0
     exclude_mask = 0
     per_atom: dict[str, dict[str, int]] = {}
@@ -257,10 +272,23 @@ def _make_solution(
     expr = " | ".join(atom.id for atom in atoms) if atoms else "FALSE"
     raw_expr = " | ".join(atom.text for atom in atoms) if atoms else "FALSE"
     def _matches(text: str, pattern: str) -> bool:
-        if "&" in pattern:
-            parts = [p.strip().strip("()") for p in pattern.split("&")]
-            return all(matcher.match_pattern(text, p) for p in parts if p)
-        return matcher.match_pattern(text, pattern)
+        def _match_piece(piece: str) -> bool:
+            piece = piece.strip()
+            if not piece:
+                return True
+            minus_parts = [p.strip().strip("()") for p in piece.split("-") if p.strip()]
+            if not minus_parts:
+                return True
+            left = minus_parts[0]
+            if not matcher.match_pattern(text, left):
+                return False
+            for right in minus_parts[1:]:
+                if matcher.match_pattern(text, right):
+                    return False
+            return True
+
+        parts = [p for p in pattern.split("&")]
+        return all(_match_piece(p) for p in parts)
     witnesses = {"tp_examples": [], "fp_examples": [], "fn_examples": []}
     dataset_pos = include
     dataset_neg = exclude
@@ -327,6 +355,8 @@ def _make_solution(
             ex_i = masks_ex[i]
             best = -1
             best_fp = ex_i.bit_count()
+            best_neg = -1
+            best_neg_fp = ex_i.bit_count()
             for j in range(i + 1, len(atoms)):
                 if used[j]:
                     continue
@@ -340,6 +370,14 @@ def _make_solution(
                     best_fp = inter_ex.bit_count()
                     best_in = inter_in
                     best_ex = inter_ex
+                # Consider subtraction A - B if B doesn't hit A's includes and reduces FP
+                diff_in = in_i & (~in_j)
+                diff_ex = ex_i & (~ex_j)
+                if diff_in.bit_count() == in_i.bit_count() and diff_ex.bit_count() < best_neg_fp:
+                    best_neg = j
+                    best_neg_fp = diff_ex.bit_count()
+                    best_neg_in = diff_in
+                    best_neg_ex = diff_ex
             if best != -1:
                 used[i] = used[best] = True
                 a = atoms[i]
@@ -358,6 +396,30 @@ def _make_solution(
                         "exclude_examples": [exclude[k] for k in range(len(exclude)) if (best_ex >> k) & 1][:3],
                         "_mask_in": best_in,
                         "_mask_ex": best_ex,
+                    }
+                )
+            elif best_neg != -1:
+                used[i] = used[best_neg] = True
+                a = atoms[i]
+                b = atoms[best_neg]
+                # Build fields maps for positive and negative if possible
+                fields_map = ( {a.field: a.text} if a.field else {} )
+                not_fields = ( {b.field: b.text} if b.field else {} )
+                terms.append(
+                    {
+                        "expr": f"{a.id} - {b.id}",
+                        "raw_expr": f"({a.text}) - ({b.text})",
+                        "field": a.field,
+                        "fields": fields_map,
+                        "not_fields": not_fields,
+                        "tp": best_neg_in.bit_count(),
+                        "fp": best_neg_ex.bit_count(),
+                        "fn": len(include) - best_neg_in.bit_count(),
+                        "length": a.length + b.length,
+                        "include_examples": [include[k] for k in range(len(include)) if (best_neg_in >> k) & 1][:3],
+                        "exclude_examples": [exclude[k] for k in range(len(exclude)) if (best_neg_ex >> k) & 1][:3],
+                        "_mask_in": best_neg_in,
+                        "_mask_ex": best_neg_ex,
                     }
                 )
             else:
@@ -411,8 +473,8 @@ def _make_solution(
         term_ex = term.pop("_mask_ex", 0)
         new_in = term_in & (~acc_in)
         new_ex = term_ex & (~acc_ex)
-        term["residual_tp"] = new_in.bit_count()
-        term["residual_fp"] = new_ex.bit_count()
+        term["incremental_tp"] = new_in.bit_count()
+        term["incremental_fp"] = new_ex.bit_count()
         acc_in |= term_in
         acc_ex |= term_ex
 
@@ -423,7 +485,9 @@ def _make_solution(
         def simple_tokens(s: str) -> list[str]:
             return [t.lower() for t in re.split(r"[^A-Za-z0-9]+", s) if len(t) >= 3]
 
-        tokens = sorted({t for item in include for t in simple_tokens(item)})
+        tokens_in = {t for item in include for t in simple_tokens(item)}
+        tokens_ex = {t for item in exclude for t in simple_tokens(item)}
+        tokens = sorted(tokens_in | tokens_ex)
         # Build masks for each token pattern *token*
         tok_in_masks: dict[str, int] = {}
         tok_ex_masks: dict[str, int] = {}
@@ -460,8 +524,8 @@ def _make_solution(
                             "length": len(t1) + len(t2),
                             "include_examples": [include[k] for k in range(len(include)) if (inter_in >> k) & 1][:3],
                             "exclude_examples": [exclude[k] for k in range(len(exclude)) if (inter_ex >> k) & 1][:3],
-                            "residual_tp": 0,
-                            "residual_fp": 0,
+                            "incremental_tp": 0,
+                            "incremental_fp": 0,
                         }
                     )
                     added += 1
@@ -469,6 +533,35 @@ def _make_solution(
                     break
             if added >= 2:
                 break
+        # Try subtraction pairs t1 - t2 where t2 doesn't hit includes and reduces FP
+        if added < 2:
+            for t1 in list(tokens_in)[:16]:
+                for t2 in list(tokens_ex)[:16]:
+                    if t1 == t2:
+                        continue
+                    diff_in = tok_in_masks[t1] & (~tok_in_masks[t2])
+                    diff_ex = tok_ex_masks[t1] & (~tok_ex_masks[t2])
+                    if diff_in.bit_count() == tok_in_masks[t1].bit_count() and diff_ex.bit_count() < tok_ex_masks[t1].bit_count():
+                        raw = f"(*{t1}*) - (*{t2}*)"
+                        terms.append(
+                            {
+                                "expr": raw,
+                                "raw_expr": raw,
+                                "tp": diff_in.bit_count(),
+                                "fp": diff_ex.bit_count(),
+                                "fn": len(include) - diff_in.bit_count(),
+                                "length": len(t1) + len(t2),
+                                "include_examples": [include[k] for k in range(len(include)) if (diff_in >> k) & 1][:3],
+                                "exclude_examples": [exclude[k] for k in range(len(exclude)) if (diff_ex >> k) & 1][:3],
+                                "incremental_tp": 0,
+                                "incremental_fp": 0,
+                            }
+                        )
+                        added += 1
+                        if added >= 2:
+                            break
+                if added >= 2:
+                    break
 
     # Promote terms' field maps into final expression (OR of per-term conjunctions)
     def term_to_text(term: dict[str, object]) -> str:
@@ -617,10 +710,23 @@ def propose_solution_structured(
 
 def _eval_atom(pattern: str, dataset: Sequence[str]) -> int:
     def _matches(text: str, pat: str) -> bool:
-        if "&" in pat:
-            parts = [p.strip().strip("()") for p in pat.split("&")]
-            return all(matcher.match_pattern(text, p) for p in parts if p)
-        return matcher.match_pattern(text, pat)
+        def _match_piece(piece: str) -> bool:
+            piece = piece.strip()
+            if not piece:
+                return True
+            minus_parts = [p.strip().strip("()") for p in piece.split("-") if p.strip()]
+            if not minus_parts:
+                return True
+            left = minus_parts[0]
+            if not matcher.match_pattern(text, left):
+                return False
+            for right in minus_parts[1:]:
+                if matcher.match_pattern(text, right):
+                    return False
+            return True
+
+        parts = [p for p in pat.split("&")]
+        return all(_match_piece(p) for p in parts)
     mask = 0
     for idx, item in enumerate(dataset):
         if _matches(item, pattern):

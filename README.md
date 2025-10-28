@@ -89,8 +89,8 @@ witnesses:
   fp_examples: []
   fn_examples: []
 terms:
-  - {expr: P1, raw_expr: "*alpha*", tp: 2, fp: 0, fn: 1, residual_tp: 2, residual_fp: 0, length: 5}
-  - {expr: P2, raw_expr: "*cache*", tp: 1, fp: 0, fn: 2, residual_tp: 1, residual_fp: 0, length: 5}
+  - {expr: P1, raw_expr: "*alpha*", tp: 2, fp: 0, fn: 1, incremental_tp: 2, incremental_fp: 0, length: 5}
+  - {expr: P2, raw_expr: "*cache*", tp: 1, fp: 0, fn: 2, incremental_tp: 1, incremental_fp: 0, length: 5}
 ```
 
 For structured inputs (rows with fields like module/instance/pin), see the “Structured per‑field matching example” below.
@@ -732,7 +732,7 @@ metrics: {covered: 2, total_positive: 2, fp: 0, fn: 0}
 atoms:
   - {id: P1, text: "*data*", kind: substring, wildcards: 2, length: 4, field: pin, tp: 2, fp: 0}
 terms:
-  - {expr: P1, raw_expr: "*data*", field: pin, tp: 2, fp: 0, fn: 0, residual_tp: 2, residual_fp: 0, length: 4}
+  - {expr: P1, raw_expr: "*data*", field: pin, tp: 2, fp: 0, fn: 0, incremental_tp: 2, incremental_fp: 0, length: 4}
 ```
 
 Notes
@@ -792,7 +792,7 @@ terms = [
   {
     'fields': t.get('fields', {}),
     'tp': t.get('tp', 0), 'fp': t.get('fp', 0), 'fn': t.get('fn', 0),
-    'residual_tp': t.get('residual_tp', 0), 'residual_fp': t.get('residual_fp', 0),
+    'incremental_tp': t.get('incremental_tp', 0), 'incremental_fp': t.get('incremental_fp', 0),
     'length': t.get('length', 0)
   }
   for t in sol.get('terms', [])
@@ -806,9 +806,9 @@ Example structured terms (YAML):
 ```yaml
 expr: "(*fabric*) & (*data*) | (*cache*) & (*data*) | (*data*)"
 terms:
-  - {fields: {module: "*fabric*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 0, residual_fp: 0, length: 10}
-  - {fields: {module: "*cache*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 0, residual_fp: 0, length: 9}
-  - {fields: {pin: "*data*"}, tp: 4, fp: 0, fn: 0, residual_tp: 4, residual_fp: 0, length: 4}
+  - {fields: {module: "*fabric*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, incremental_tp: 0, incremental_fp: 0, length: 10}
+  - {fields: {module: "*cache*", pin: "*data*"}, tp: 4, fp: 0, fn: 0, incremental_tp: 0, incremental_fp: 0, length: 9}
+  - {fields: {pin: "*data*"}, tp: 4, fp: 0, fn: 0, incremental_tp: 4, incremental_fp: 0, length: 4}
 ```
 
 CLI tip

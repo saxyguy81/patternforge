@@ -41,3 +41,19 @@ def test_conjunction_term_present_and_reduces_fp() -> None:
     assert conj["fp"] == 0
     assert conj["tp"] == 2
 
+
+def test_and_not_term_present_and_reduces_fp() -> None:
+    include = [
+        "mod/cache",
+        "mod/cache",
+    ]
+    exclude = [
+        "dbg/cache",
+    ]
+    sol = propose_solution(include, exclude, _opts_complex())
+    terms = sol.get("terms", [])
+    # Expect a '-' based term
+    assert any("-" in t.get("expr", "") or "-" in t.get("raw_expr", "") for t in terms)
+    minus = next(t for t in terms if "-" in t.get("expr", "") or "-" in t.get("raw_expr", ""))
+    assert minus["fp"] == 0
+    assert minus["tp"] == 2

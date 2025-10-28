@@ -159,3 +159,54 @@ def summarize_text(solution: dict[str, object]) -> str:
         f"Primary coverage comes from {primary['text']} with {primary.get('tp','?')} matches. "
         f"In total the formula uses {len(atoms)} atoms."
     )
+
+
+def explain_simple(
+    solution: dict[str, object], include, exclude
+) -> str:
+    terms = solution.get("terms", []) or []
+    # Determine if structured by presence of non-empty 'fields'
+    structured = any(bool(t.get("fields")) for t in terms)
+    # Sort descending by residual contribution first
+    terms_sorted = sorted(terms, key=lambda t: t.get("incremental_tp", 0), reverse=True)
+    # Label depends on term method: additive -> matches, subtractive -> removed
+    term_method = solution.get("term_method", "additive")
+    label = "removed" if term_method == "subtractive" else "matches"
+    lines: list[str] = []
+    if structured:
+        order = ["module", "instance", "pin"]
+        for t in terms_sorted:
+            fields = t.get("fields", {}) or {}
+            not_fields = t.get("not_fields", {}) or {}
+            parts: list[str] = []
+            # Show canonical fields in order, skip wildcard-only '*' fields
+            for k in order:
+                pat = fields.get(k)
+                if pat and pat != "*":
+                    parts.append(f"{k}: {pat}")
+            # Include any additional fields deterministically, skipping '*'
+            extra_keys = sorted(set(fields.keys()) - set(order))
+            for k in extra_keys:
+                pat = fields.get(k)
+                if pat and pat != "*":
+                    parts.append(f"{k}: {pat}")
+            # Append negative fields as '- key: pattern'
+            for k in order:
+                npat = not_fields.get(k)
+                if npat and npat != "*":
+                    parts.append(f"- {k}: {npat}")
+            for k in sorted(set(not_fields.keys()) - set(order)):
+                npat = not_fields.get(k)
+                if npat and npat != "*":
+                    parts.append(f"- {k}: {npat}")
+            tp = t.get("tp", 0)
+            rtp = t.get("incremental_tp", 0)
+            text = " ".join(parts) if parts else str(t.get("raw_expr", "*"))
+            lines.append(f"{text}  (# incremental {label}: {rtp}, total {label}: {tp})")
+    else:
+        for t in terms_sorted:
+            raw = str(t.get("raw_expr", t.get("expr", "*")))
+            tp = t.get("tp", 0)
+            rtp = t.get("incremental_tp", 0)
+            lines.append(f"{raw}  (# incremental {label}: {rtp}, total {label}: {tp})")
+    return "\n".join(lines)
