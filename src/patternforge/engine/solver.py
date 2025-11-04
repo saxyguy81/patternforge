@@ -683,6 +683,32 @@ def propose_solution_structured(
       tokens.iter_structured_tokens_with_fields(...)
     - field_getter: optional function(row, field_name) -> str
     """
+    # In EXACT mode, automatically enforce max_fp=0 if not already set
+    from .models import QualityMode, OptimizeBudgets
+    if options.mode == QualityMode.EXACT and options.budgets.max_fp is None:
+        options = SolveOptions(
+            mode=options.mode,
+            invert=options.invert,
+            weights=options.weights,
+            budgets=OptimizeBudgets(
+                max_candidates=options.budgets.max_candidates,
+                max_atoms=options.budgets.max_atoms,
+                max_ops=options.budgets.max_ops,
+                depth=options.budgets.depth,
+                max_multi_segments=options.budgets.max_multi_segments,
+                max_fp=0,  # Enforce zero false positives in EXACT mode
+                max_fn=options.budgets.max_fn,
+            ),
+            allow_not_on_atoms=options.allow_not_on_atoms,
+            allow_complex_terms=options.allow_complex_terms,
+            min_token_len=options.min_token_len,
+            per_word_substrings=options.per_word_substrings,
+            per_word_multi=options.per_word_multi,
+            per_word_cuts=options.per_word_cuts,
+            max_multi_segments=options.max_multi_segments,
+            splitmethod=options.splitmethod,
+            seed=options.seed,
+        )
     # Build canonical strings for matching text/witnesses
     def canon(row: object) -> str:
         if isinstance(row, dict):
