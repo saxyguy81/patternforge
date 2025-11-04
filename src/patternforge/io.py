@@ -1,4 +1,6 @@
 """Input/output helpers for the patternforge CLI."""
+from __future__ import annotations
+
 import csv
 import json
 import os

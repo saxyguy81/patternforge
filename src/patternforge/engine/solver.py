@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from . import matcher
+from . import bitset
 from .candidates import generate_candidates
 from .tokens import Token
 from .models import Atom, Candidate, InvertStrategy, Solution, SolveOptions
@@ -50,8 +51,8 @@ def _resolve_weights(options: SolveOptions) -> dict[str, float]:
 
 
 def _cost(selection: _Selection, include_size: int, weights: dict[str, float]) -> float:
-    matched = selection.include_bits.bit_count()
-    fp = selection.exclude_bits.bit_count()
+    matched = bitset.count_bits(selection.include_bits)
+    fp = bitset.count_bits(selection.exclude_bits)
     fn = include_size - matched
     atoms = len(selection.chosen)
     wildcards = sum(c.wildcards for c in selection.chosen)
@@ -131,8 +132,8 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
                 exclude_bits=new_exclude_bits,
             )
             trial_cost = _cost(trial, len(ctx.include), weights)
-            gain = selection.include_bits.bit_count()
-            new_gain = new_include_bits.bit_count()
+            gain = bitset.count_bits(selection.include_bits)
+            new_gain = bitset.count_bits(new_include_bits)
             if trial_cost < best_candidate_cost or (
                 trial_cost == best_candidate_cost and (
                     new_gain > gain
@@ -228,11 +229,11 @@ def _evaluate_atoms(
         include_mask |= mask_in
         exclude_mask |= mask_ex
         per_atom[atom.id] = {
-            "tp": mask_in.bit_count(),
-            "fp": mask_ex.bit_count(),
+            "tp": bitset.count_bits(mask_in),
+            "fp": bitset.count_bits(mask_ex),
         }
-    matched = include_mask.bit_count()
-    fp = exclude_mask.bit_count()
+    matched = bitset.count_bits(include_mask)
+    fp = bitset.count_bits(exclude_mask)
     fn = len(include) - matched
     return matched, fp, fn, per_atom
 
@@ -354,9 +355,9 @@ def _make_solution(
             in_i = masks_in[i]
             ex_i = masks_ex[i]
             best = -1
-            best_fp = ex_i.bit_count()
+            best_fp = bitset.count_bits(ex_i)
             best_neg = -1
-            best_neg_fp = ex_i.bit_count()
+            best_neg_fp = bitset.count_bits(ex_i)
             for j in range(i + 1, len(atoms)):
                 if used[j]:
                     continue
@@ -365,17 +366,17 @@ def _make_solution(
                 inter_in = in_i & in_j
                 inter_ex = ex_i & ex_j
                 # Only consider if preserves TP of the first while reducing FP
-                if inter_in.bit_count() == in_i.bit_count() and inter_ex.bit_count() < best_fp:
+                if bitset.count_bits(inter_in) == bitset.count_bits(in_i) and bitset.count_bits(inter_ex) < best_fp:
                     best = j
-                    best_fp = inter_ex.bit_count()
+                    best_fp = bitset.count_bits(inter_ex)
                     best_in = inter_in
                     best_ex = inter_ex
                 # Consider subtraction A - B if B doesn't hit A's includes and reduces FP
                 diff_in = in_i & (~in_j)
                 diff_ex = ex_i & (~ex_j)
-                if diff_in.bit_count() == in_i.bit_count() and diff_ex.bit_count() < best_neg_fp:
+                if bitset.count_bits(diff_in) == bitset.count_bits(in_i) and bitset.count_bits(diff_ex) < best_neg_fp:
                     best_neg = j
-                    best_neg_fp = diff_ex.bit_count()
+                    best_neg_fp = bitset.count_bits(diff_ex)
                     best_neg_in = diff_in
                     best_neg_ex = diff_ex
             if best != -1:
@@ -388,9 +389,9 @@ def _make_solution(
                         "raw_expr": f"({a.text}) & ({b.text})",
                         "field": a.field or b.field,
                         "fields": {k: v for k, v in ((a.field, a.text), (b.field, b.text)) if k},
-                        "tp": best_in.bit_count(),
-                        "fp": best_ex.bit_count(),
-                        "fn": len(include) - best_in.bit_count(),
+                        "tp": bitset.count_bits(best_in),
+                        "fp": bitset.count_bits(best_ex),
+                        "fn": len(include) - bitset.count_bits(best_in),
                         "length": a.length + b.length,
                         "include_examples": [include[k] for k in range(len(include)) if (best_in >> k) & 1][:3],
                         "exclude_examples": [exclude[k] for k in range(len(exclude)) if (best_ex >> k) & 1][:3],
@@ -412,9 +413,9 @@ def _make_solution(
                         "field": a.field,
                         "fields": fields_map,
                         "not_fields": not_fields,
-                        "tp": best_neg_in.bit_count(),
-                        "fp": best_neg_ex.bit_count(),
-                        "fn": len(include) - best_neg_in.bit_count(),
+                        "tp": bitset.count_bits(best_neg_in),
+                        "fp": bitset.count_bits(best_neg_ex),
+                        "fn": len(include) - bitset.count_bits(best_neg_in),
                         "length": a.length + b.length,
                         "include_examples": [include[k] for k in range(len(include)) if (best_neg_in >> k) & 1][:3],
                         "exclude_examples": [exclude[k] for k in range(len(exclude)) if (best_neg_ex >> k) & 1][:3],
@@ -433,9 +434,9 @@ def _make_solution(
                         "raw_expr": atom.text,
                         "field": atom.field,
                         "fields": ({atom.field: atom.text} if atom.field else {}),
-                        "tp": in_m.bit_count(),
-                        "fp": ex_m.bit_count(),
-                        "fn": len(include) - in_m.bit_count(),
+                        "tp": bitset.count_bits(in_m),
+                        "fp": bitset.count_bits(ex_m),
+                        "fn": len(include) - bitset.count_bits(in_m),
                         "length": atom.length,
                         "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
                         "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
@@ -453,9 +454,9 @@ def _make_solution(
                     "raw_expr": atom.text,
                     "field": atom.field,
                     "fields": ({atom.field: atom.text} if atom.field else {}),
-                    "tp": in_m.bit_count(),
-                    "fp": ex_m.bit_count(),
-                    "fn": len(include) - in_m.bit_count(),
+                    "tp": bitset.count_bits(in_m),
+                    "fp": bitset.count_bits(ex_m),
+                    "fn": len(include) - bitset.count_bits(in_m),
                     "length": atom.length,
                     "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
                     "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
@@ -473,8 +474,8 @@ def _make_solution(
         term_ex = term.pop("_mask_ex", 0)
         new_in = term_in & (~acc_in)
         new_ex = term_ex & (~acc_ex)
-        term["incremental_tp"] = new_in.bit_count()
-        term["incremental_fp"] = new_ex.bit_count()
+        term["incremental_tp"] = bitset.count_bits(new_in)
+        term["incremental_fp"] = bitset.count_bits(new_ex)
         acc_in |= term_in
         acc_ex |= term_ex
 
@@ -512,15 +513,15 @@ def _make_solution(
                 if inter_in == 0:
                     continue
                 # prefer pairs that cover all includes and 0 FP
-                if inter_in.bit_count() == len(include) and inter_ex.bit_count() == 0:
+                if bitset.count_bits(inter_in) == len(include) and bitset.count_bits(inter_ex) == 0:
                     raw = f"(*{t1}*) & (*{t2}*)"
                     terms.append(
                         {
                             "expr": raw,
                             "raw_expr": raw,
-                            "tp": inter_in.bit_count(),
-                            "fp": inter_ex.bit_count(),
-                            "fn": len(include) - inter_in.bit_count(),
+                            "tp": bitset.count_bits(inter_in),
+                            "fp": bitset.count_bits(inter_ex),
+                            "fn": len(include) - bitset.count_bits(inter_in),
                             "length": len(t1) + len(t2),
                             "include_examples": [include[k] for k in range(len(include)) if (inter_in >> k) & 1][:3],
                             "exclude_examples": [exclude[k] for k in range(len(exclude)) if (inter_ex >> k) & 1][:3],
@@ -541,15 +542,15 @@ def _make_solution(
                         continue
                     diff_in = tok_in_masks[t1] & (~tok_in_masks[t2])
                     diff_ex = tok_ex_masks[t1] & (~tok_ex_masks[t2])
-                    if diff_in.bit_count() == tok_in_masks[t1].bit_count() and diff_ex.bit_count() < tok_ex_masks[t1].bit_count():
+                    if bitset.count_bits(diff_in) == bitset.count_bits(tok_in_masks[t1]) and bitset.count_bits(diff_ex) < bitset.count_bits(tok_ex_masks[t1]):
                         raw = f"(*{t1}*) - (*{t2}*)"
                         terms.append(
                             {
                                 "expr": raw,
                                 "raw_expr": raw,
-                                "tp": diff_in.bit_count(),
-                                "fp": diff_ex.bit_count(),
-                                "fn": len(include) - diff_in.bit_count(),
+                                "tp": bitset.count_bits(diff_in),
+                                "fp": bitset.count_bits(diff_ex),
+                                "fn": len(include) - bitset.count_bits(diff_in),
                                 "length": len(t1) + len(t2),
                                 "include_examples": [include[k] for k in range(len(include)) if (diff_in >> k) & 1][:3],
                                 "exclude_examples": [exclude[k] for k in range(len(exclude)) if (diff_ex >> k) & 1][:3],
@@ -831,8 +832,8 @@ def evaluate_expr(
     exclude_universe = (1 << len(exclude)) - 1 if exclude else 0
     include_mask = _eval_ast(ast, include_masks, include_universe)
     exclude_mask = _eval_ast(ast, exclude_masks, exclude_universe)
-    matched = include_mask.bit_count()
-    fp = exclude_mask.bit_count()
+    matched = bitset.count_bits(include_mask)
+    fp = bitset.count_bits(exclude_mask)
     fn = len(include) - matched
     return {
         "covered": matched,

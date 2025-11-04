@@ -56,6 +56,24 @@ def generate_candidates(
             pool.push(joined, "exact", float(len(joined)), field)
         for token in tokens:
             pool.push(token, "exact", float(len(token)), field)
+
+        # Generate prefix patterns: token/* (anchored start)
+        if len(tokens) >= 1 and tokens[0]:
+            first_token = tokens[0]
+            pattern = f"{first_token}/*"
+            # Score higher than substring to prefer anchored patterns
+            # Fewer wildcards (1) vs substring (2) should be preferred
+            score = len(first_token) * 1.5
+            pool.push(pattern, "prefix", float(score), field)
+
+        # Generate suffix patterns: */token (anchored end)
+        if len(tokens) >= 1 and tokens[-1]:
+            last_token = tokens[-1]
+            pattern = f"*/{last_token}"
+            # Score higher than substring to prefer anchored patterns
+            score = len(last_token) * 1.5
+            pool.push(pattern, "suffix", float(score), field)
+
         if len(tokens) >= 2:
             for start in range(len(tokens)):
                 for end in range(start + 1, min(len(tokens), start + max_multi_segments) + 1):

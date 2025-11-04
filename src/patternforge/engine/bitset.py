@@ -18,7 +18,9 @@ def full_bitset(count: int) -> int:
 
 
 def count_bits(value: int) -> int:
-    return value.bit_count()
+    """Count the number of set bits in an integer (Python 3.9 compatible)."""
+    # Python 3.10+ has int.bit_count(), but for 3.9 we use bin().count('1')
+    return bin(value).count('1')
 
 
 def iter_indexes(value: int) -> Iterable[int]:
