@@ -184,13 +184,53 @@ def greedy_set_cover_structured(
                 best_mask = stats.include_mask
                 best_fp_mask = stats.exclude_mask
 
-        # TODO: Try two-field combinations for better specificity
-        # This would be O(F² × P²) but only if single-field patterns insufficient
+        # Try two-field combinations if we have FP and can improve - O(F² × P²) per iteration
+        # Only do this if max_fp is strict and we're close to limit
+        if max_fp == 0 and best_term is None:
+            # Need multi-field expressions to avoid FP
+            for (field1, pat1), stats1 in pattern_stats.items():
+                new_cov1 = stats1.include_mask & (~covered_mask)
+                if bitset.count_bits(new_cov1) == 0:
+                    continue
+
+                # Try adding second field to reduce FP
+                for (field2, pat2), stats2 in pattern_stats.items():
+                    if field1 == field2:
+                        continue
+
+                    # Combined mask: both patterns must match
+                    combined_include = stats1.include_mask & stats2.include_mask
+                    combined_exclude = stats1.exclude_mask & stats2.exclude_mask
+
+                    new_coverage_mask = combined_include & (~covered_mask)
+                    new_coverage = bitset.count_bits(new_coverage_mask)
+
+                    if new_coverage == 0:
+                        continue
+
+                    new_fp_mask = fp_mask | combined_exclude
+                    new_fp = bitset.count_bits(new_fp_mask)
+
+                    if new_fp > max_fp:
+                        continue
+
+                    # Score multi-field expressions higher (more specific)
+                    weight1 = field_weights.get(field1, 1.0) if field_weights else 1.0
+                    weight2 = field_weights.get(field2, 1.0) if field_weights else 1.0
+                    score = new_coverage * (weight1 + weight2) * 0.75 - new_fp * 10  # Slight penalty for complexity
+
+                    if score > best_score or (score == best_score and new_coverage > best_coverage):
+                        best_term = {field1: pat1, field2: pat2}
+                        best_coverage = new_coverage
+                        best_fp = new_fp
+                        best_score = score
+                        best_mask = combined_include
+                        best_fp_mask = combined_exclude
 
         if best_term is None:
             break  # Can't cover more without violating constraints
 
-        # Select this term
+        # Select this expression
         selected_terms.append({
             "fields": best_term,
             "include_mask": best_mask,

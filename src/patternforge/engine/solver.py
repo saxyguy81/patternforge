@@ -681,6 +681,7 @@ def propose_solution_structured(
     min_token_len: int = 3,
     options: SolveOptions | None = None,
     mode: str = "EXACT",
+    effort: str = "medium",  # NEW: "low", "medium", "high", "exhaustive"
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
 ) -> dict[str, object]:
@@ -714,6 +715,12 @@ def propose_solution_structured(
 
         mode: "EXACT" (zero false positives) or "APPROX" (allow some FP)
 
+        effort: Complexity vs quality trade-off (NEW!)
+            - "low": Fast, minimal candidates, O(N) - use for quick results
+            - "medium": Balanced, adaptive selection (default)
+            - "high": Best quality, more candidates
+            - "exhaustive": Try everything - only for N < 100, F < 5
+
         token_iter: [Advanced] Pre-generated token iterator (auto-generated if None)
 
         field_getter: [Advanced] Custom field getter function(row, field) -> str
@@ -743,6 +750,19 @@ def propose_solution_structured(
         ...     'pin': ['DIN', 'DOUT']
         ... })
         >>> solution = propose_solution_structured(df, df_exclude)
+
+        >>> # High effort for best quality (slower)
+        >>> solution = propose_solution_structured(
+        ...     include, exclude,
+        ...     effort="high"
+        ... )
+
+        >>> # Low effort for quick results
+        >>> solution = propose_solution_structured(
+        ...     large_dataset,  # 10k rows
+        ...     large_excludes,
+        ...     effort="low"  # Fast, O(N)
+        ... )
     """
     from .tokens import make_split_tokenizer, iter_structured_tokens_with_fields
 
@@ -812,33 +832,182 @@ def propose_solution_structured(
             field_order=fields
         ))
 
-    # Call internal implementation
-    return _propose_solution_structured_impl(
+    # Adaptive algorithm selection based on N, F, and effort
+    from .adaptive import select_algorithm, get_effort_from_string, AlgorithmChoice
+
+    effort_level = get_effort_from_string(effort)
+    algorithm, config = select_algorithm(
+        num_include=len(include_rows),
+        num_exclude=len(exclude_rows),
+        num_fields=len(fields),
+        effort=effort_level
+    )
+
+    # Route to appropriate algorithm
+    if algorithm == AlgorithmChoice.SCALABLE:
+        # Pattern-centric scalable solver for large datasets
+        return _propose_solution_structured_scalable(
+            include_rows,
+            exclude_rows,
+            fields,
+            field_getter or _default_field_getter,
+            field_weights,
+            options or SolveOptions(),
+            config
+        )
+    else:
+        # Bounded or exhaustive: use expression-based solver
+        return _propose_solution_structured_bounded(
+            include_rows,
+            exclude_rows,
+            options,
+            token_iter=token_iter,
+            field_getter=field_getter,
+            field_weights=field_weights,
+            config=config
+        )
+
+
+def _propose_solution_structured_scalable(
+    include_rows: Sequence[dict],
+    exclude_rows: Sequence[dict],
+    field_names: list[str],
+    field_getter: Callable,
+    field_weights: dict[str, float] | None,
+    options: SolveOptions,
+    config: dict,
+) -> dict[str, object]:
+    """
+    Scalable pattern-centric implementation for large datasets.
+    O(F × P × N) complexity.
+    """
+    from .structured_scalable import (
+        generate_field_patterns_scalable,
+        greedy_set_cover_structured,
+    )
+    from .models import Atom, Solution
+    from . import bitset
+
+    # Generate global patterns per field
+    field_patterns = generate_field_patterns_scalable(
+        include_rows,
+        field_names,
+        field_getter,
+        max_patterns_per_field=config.get("max_patterns_per_field", 100)
+    )
+
+    # Greedy set cover with lazy multi-field construction
+    max_fp = options.budgets.max_fp if options.budgets.max_fp is not None else 0
+    selected_expressions = greedy_set_cover_structured(
         include_rows,
         exclude_rows,
-        options,
-        token_iter=token_iter,
-        field_getter=field_getter,
+        field_names,
+        field_patterns,
+        field_getter,
+        max_fp=max_fp,
         field_weights=field_weights
     )
 
+    # Build solution
+    atoms = []
+    expressions_output = []
 
-def _propose_solution_structured_impl(
+    for expr_idx, expr_dict in enumerate(selected_expressions, 1):
+        fields_dict = expr_dict["fields"]
+        expressions_output.append({
+            "expr": f"E{expr_idx}",
+            "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in fields_dict.items()),
+            "fields": fields_dict,
+            "tp": bitset.count_bits(expr_dict["include_mask"]),
+            "fp": bitset.count_bits(expr_dict["exclude_mask"]),
+            "fn": len(include_rows) - bitset.count_bits(expr_dict["include_mask"]),
+        })
+
+        # Create atoms
+        for field_name, pattern in fields_dict.items():
+            atoms.append(Atom(
+                id=f"E{expr_idx}_{field_name}",
+                text=pattern,
+                kind="structured",
+                wildcards=pattern.count("*"),
+                length=len(pattern),
+                field=field_name,
+            ))
+
+    # Compute metrics
+    covered_mask = 0
+    fp_mask = 0
+    for expr_dict in selected_expressions:
+        covered_mask |= expr_dict["include_mask"]
+        fp_mask |= expr_dict["exclude_mask"]
+
+    metrics = {
+        "covered": bitset.count_bits(covered_mask),
+        "total_positive": len(include_rows),
+        "fp": bitset.count_bits(fp_mask),
+        "fn": len(include_rows) - bitset.count_bits(covered_mask),
+        "atoms": len(atoms),
+        "expressions": len(expressions_output),
+        "boolean_ops": max(0, len(expressions_output) - 1),
+        "wildcards": sum(a.wildcards for a in atoms),
+        "pattern_chars": sum(a.length for a in atoms),
+    }
+
+    # Build expression string
+    if expressions_output:
+        expr_parts = []
+        for expr_dict in expressions_output:
+            field_parts = [f"({field}: {pat})" for field, pat in expr_dict["fields"].items()]
+            expr_parts.append(" & ".join(field_parts))
+        expr_text = " | ".join(f"({part})" for part in expr_parts)
+    else:
+        expr_text = "FALSE"
+
+    # Canonicalize for witnesses
+    def canon(row):
+        if isinstance(row, dict):
+            return "/".join(str(v) for v in row.values() if v)
+        return str(row)
+
+    include_strs = [canon(r) for r in include_rows]
+    exclude_strs = [canon(r) for r in exclude_rows]
+
+    witnesses = {
+        "tp_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
+        "fp_examples": [exclude_strs[i] for i in range(len(exclude_rows)) if (fp_mask >> i) & 1][:3],
+        "fn_examples": [include_strs[i] for i in range(len(include_rows)) if not ((covered_mask >> i) & 1)][:3],
+    }
+
+    return Solution(
+        expr=expr_text,
+        raw_expr=expr_text,
+        global_inverted=False,
+        term_method="structured_scalable",
+        mode=options.mode.value,
+        options={
+            "mode": options.mode.value,
+            "splitmethod": options.splitmethod,
+            "algorithm": "scalable",
+        },
+        atoms=atoms,
+        metrics=metrics,
+        witnesses=witnesses,
+        expressions=expressions_output,
+    ).to_json()
+
+
+def _propose_solution_structured_bounded(
     include_rows: Sequence[object],
     exclude_rows: Sequence[object],
     options: SolveOptions,
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
     field_weights: dict[str, float] | None = None,
+    config: dict | None = None,
 ) -> dict[str, object]:
     """
-    Internal implementation of structured solver.
-    Propose a solution over structured rows, with per-field atoms. Each atom carries a 'field'.
-    - include_rows/exclude_rows: list of dicts or tuples representing fields
-    - token_iter: expected to yield (row_index, Token, field_name) triples, e.g., from
-      tokens.iter_structured_tokens_with_fields(...)
-    - field_getter: optional function(row, field_name) -> str
-    - field_weights: optional dict mapping field names to weights (higher = prefer patterns on this field)
+    Bounded expression-based implementation for small-medium datasets.
+    O(N) with capped candidates.
     """
     from .structured_expressions import (
         generate_structured_expression_candidates,
