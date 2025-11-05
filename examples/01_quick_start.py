@@ -5,10 +5,7 @@ Quick Start Examples: Simplest possible usage of PatternForge
 This file demonstrates the most basic usage patterns for both single-field
 and multi-field matching. For more advanced features, see other example files.
 """
-import sys
-sys.path.insert(0, "../src")
 
-from patternforge.engine.models import SolveOptions, QualityMode
 from patternforge.engine.solver import propose_solution, propose_solution_structured
 
 print("=" * 80)
@@ -45,18 +42,18 @@ for path in exclude:
     print(f"  ✗ {path}")
 
 # Simplest possible usage - defaults work well!
-solution = propose_solution(include, exclude, SolveOptions())
+solution = propose_solution(include, exclude)
 
 print(f"\n📤 SOLUTION:")
-print(f"  Expression: {solution['expr']}")
-print(f"  Raw pattern: {solution.get('raw_expr', 'N/A')}")
-print(f"  Coverage: {solution['metrics']['covered']}/{solution['metrics']['total_positive']}")
-print(f"  False positives: {solution['metrics']['fp']}")
-print(f"  Patterns used: {len(solution['atoms'])}")
+print(f"  Expression: {solution.expr}")
+print(f"  Raw pattern: {solution.raw_expr}")
+print(f"  Coverage: {solution.metrics['covered']}/{solution.metrics['total_positive']}")
+print(f"  False positives: {solution.metrics['fp']}")
+print(f"  Patterns used: {len(solution.patterns)}")
 
 print(f"\n  Patterns:")
-for atom in solution['atoms']:
-    print(f"    {atom['id']:4s}: {atom['text']:20s} (type: {atom['kind']})")
+for pattern in solution.patterns:
+    print(f"    {pattern.id:4s}: {pattern.text:20s} (type: {pattern.kind})")
 
 # ============================================================================
 # EXAMPLE 2: Structured Multi-Field Pattern Matching
@@ -93,16 +90,16 @@ for row in exclude_rows:
 solution = propose_solution_structured(include_rows, exclude_rows)
 
 print(f"\n📤 SOLUTION:")
-print(f"  Expression: {solution['expr']}")
-print(f"  Raw pattern: {solution.get('raw_expr', 'N/A')}")
-print(f"  Coverage: {solution['metrics']['covered']}/{solution['metrics']['total_positive']}")
-print(f"  False positives: {solution['metrics']['fp']}")
-print(f"  Expressions used: {len(solution.get('expressions', []))}")
+print(f"  Expression: {solution.expr}")
+print(f"  Raw pattern: {solution.raw_expr}")
+print(f"  Coverage: {solution.metrics['covered']}/{solution.metrics['total_positive']}")
+print(f"  False positives: {solution.metrics['fp']}")
+print(f"  Expressions used: {len(solution.expressions)}")
 
 print(f"\n  Patterns by field:")
-for atom in solution['atoms']:
-    field = atom.get('field', 'ALL')
-    print(f"    {field:10s}: {atom['text']:20s} (type: {atom['kind']})")
+for pattern in solution.patterns:
+    field = pattern.field or 'ALL'
+    print(f"    {field:10s}: {pattern.text:20s} (type: {pattern.kind})")
 
 # ============================================================================
 # EXAMPLE 3: Exact vs Approximate Modes
@@ -126,23 +123,23 @@ large_exclude = [
 
 print(f"Dataset: {len(large_include)} include, {len(large_exclude)} exclude")
 
-# EXACT mode
+# EXACT mode (zero false positives guaranteed)
 sol_exact = propose_solution(
     large_include, large_exclude,
-    SolveOptions(mode=QualityMode.EXACT)
+    mode="EXACT"  # Zero FP guarantee
 )
 print(f"\nEXACT mode:")
-print(f"  Pattern: {sol_exact.get('raw_expr', 'N/A')}")
-print(f"  FP: {sol_exact['metrics']['fp']}, Atoms: {sol_exact['metrics']['atoms']}")
+print(f"  Pattern: {sol_exact.raw_expr}")
+print(f"  FP: {sol_exact.metrics['fp']}, Patterns: {sol_exact.metrics['patterns']}")
 
-# APPROX mode (faster)
+# APPROX mode (faster, may allow some FP)
 sol_approx = propose_solution(
     large_include, large_exclude,
-    SolveOptions(mode=QualityMode.APPROX)
+    mode="APPROX"  # Faster, simpler patterns
 )
 print(f"\nAPPROX mode:")
-print(f"  Pattern: {sol_approx.get('raw_expr', 'N/A')}")
-print(f"  FP: {sol_approx['metrics']['fp']}, Atoms: {sol_approx['metrics']['atoms']}")
+print(f"  Pattern: {sol_approx.raw_expr}")
+print(f"  FP: {sol_approx.metrics['fp']}, Patterns: {sol_approx.metrics['patterns']}")
 
 print("\n" + "=" * 80)
 print("✅ Quick start complete! See other examples for advanced features:")

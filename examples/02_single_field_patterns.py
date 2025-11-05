@@ -11,13 +11,10 @@ This file demonstrates all pattern types for single-field (flat string) matching
 
 For multi-field structured data, see 03_structured_patterns.py
 """
-import sys
-sys.path.insert(0, "../src")
 
-from patternforge.engine.models import SolveOptions, QualityMode, InvertStrategy
 from patternforge.engine.solver import propose_solution
 
-def print_solution(title, include, exclude, options=None):
+def print_solution(title, include, exclude, **kwargs):
     """Helper to print a solution with formatting."""
     print("\n" + "=" * 80)
     print(title)
@@ -37,30 +34,30 @@ def print_solution(title, include, exclude, options=None):
         if len(exclude) > 5:
             print(f"      ... and {len(exclude) - 5} more")
 
-    solution = propose_solution(include, exclude, options or SolveOptions())
+    solution = propose_solution(include, exclude, **kwargs)
 
     print(f"\n📤 OUTPUT:")
-    print(f"  Expression: {solution['expr']}")
-    print(f"  Raw pattern: {solution.get('raw_expr', 'N/A')}")
+    print(f"  Expression: {solution.expr}")
+    print(f"  Raw pattern: {solution.raw_expr}")
     print(f"\n  📊 Metrics:")
-    print(f"    Coverage:      {solution['metrics']['covered']}/{solution['metrics']['total_positive']} ({100*solution['metrics']['covered']/max(1, solution['metrics']['total_positive']):.0f}%)")
-    print(f"    False Pos:     {solution['metrics']['fp']} ✅")
-    print(f"    Patterns:      {solution['metrics']['atoms']}")
-    print(f"    Wildcards:     {solution['metrics']['wildcards']}")
+    print(f"    Coverage:      {solution.metrics['covered']}/{solution.metrics['total_positive']} ({100*solution.metrics['covered']/max(1, solution.metrics['total_positive']):.0f}%)")
+    print(f"    False Pos:     {solution.metrics['fp']} ✅")
+    print(f"    Patterns:      {solution.metrics['patterns']}")
+    print(f"    Wildcards:     {solution.metrics['wildcards']}")
 
     print(f"\n  🎯 Pattern Details:")
-    for atom in solution['atoms']:
+    for pattern in solution.patterns:
         kind_desc = {
             'prefix': 'PREFIX (starts with)',
             'suffix': 'SUFFIX (ends with)',
             'substring': 'SUBSTRING (contains)',
             'multi': 'MULTI-SEGMENT (ordered keywords)',
             'exact': 'EXACT (full match)'
-        }.get(atom['kind'], atom['kind'].upper())
+        }.get(pattern.kind, pattern.kind.upper())
 
-        print(f"\n    [{atom['id']}] {atom['text']}")
+        print(f"\n    [{pattern.id}] {pattern.text}")
         print(f"        Type: {kind_desc}")
-        print(f"        Matches: {atom['tp']} paths, FP: {atom['fp']}, Wildcards: {atom['wildcards']}")
+        print(f"        Matches: {pattern.tp} paths, FP: {pattern.fp}, Wildcards: {pattern.wildcards}")
 
     return solution
 
@@ -206,7 +203,7 @@ print("EXAMPLE 6: Inverted Patterns - Everything EXCEPT")
 print("=" * 80)
 print("""
 Sometimes it's easier to specify what you DON'T want.
-InvertStrategy.ALWAYS returns the complement: "everything EXCEPT pattern"
+invert="always" returns the complement: "everything EXCEPT pattern"
 """)
 
 include = [
@@ -223,23 +220,23 @@ exclude = [
 ]
 
 print("\nNormal mode (find what includes have in common):")
-sol_normal = propose_solution(include, exclude, SolveOptions(invert=InvertStrategy.NEVER))
-print(f"  Pattern: {sol_normal.get('raw_expr', 'N/A')}")
-print(f"  Inverted: {sol_normal.get('global_inverted', False)}")
-print(f"  Coverage: {sol_normal['metrics']['covered']}/{sol_normal['metrics']['total_positive']}")
+sol_normal = propose_solution(include, exclude, invert="never")
+print(f"  Pattern: {sol_normal.raw_expr}")
+print(f"  Inverted: {sol_normal.global_inverted}")
+print(f"  Coverage: {sol_normal.metrics['covered']}/{sol_normal.metrics['total_positive']}")
 
 print("\nInverted mode (everything except debug):")
-sol_inverted = propose_solution(include, exclude, SolveOptions(invert=InvertStrategy.ALWAYS))
-print(f"  Pattern: {sol_inverted.get('raw_expr', 'N/A')}")
-print(f"  Inverted: {sol_inverted.get('global_inverted', False)}")
-print(f"  Coverage: {sol_inverted['metrics']['covered']}/{sol_inverted['metrics']['total_positive']}")
-print(f"  Meaning: Match everything EXCEPT {sol_inverted.get('raw_expr', 'N/A')}")
+sol_inverted = propose_solution(include, exclude, invert="always")
+print(f"  Pattern: {sol_inverted.raw_expr}")
+print(f"  Inverted: {sol_inverted.global_inverted}")
+print(f"  Coverage: {sol_inverted.metrics['covered']}/{sol_inverted.metrics['total_positive']}")
+print(f"  Meaning: Match everything EXCEPT {sol_inverted.raw_expr}")
 
 print("\nAuto mode (solver picks best):")
-sol_auto = propose_solution(include, exclude, SolveOptions(invert=InvertStrategy.AUTO))
-print(f"  Pattern: {sol_auto.get('raw_expr', 'N/A')}")
-print(f"  Inverted: {sol_auto.get('global_inverted', False)}")
-print(f"  Coverage: {sol_auto['metrics']['covered']}/{sol_auto['metrics']['total_positive']}")
+sol_auto = propose_solution(include, exclude, invert="auto")
+print(f"  Pattern: {sol_auto.raw_expr}")
+print(f"  Inverted: {sol_auto.global_inverted}")
+print(f"  Coverage: {sol_auto.metrics['covered']}/{sol_auto.metrics['total_positive']}")
 
 # ============================================================================
 # EXAMPLE 7: Real-World Use Case - Regression Triage
@@ -287,14 +284,14 @@ for p in paths:
     print(f"  {p}")
 
 print("\nWith splitmethod='classchange':")
-sol_class = propose_solution(paths, [], SolveOptions(splitmethod='classchange'))
-print(f"  Pattern: {sol_class.get('raw_expr', 'N/A')}")
-print(f"  Atoms: {sol_class['metrics']['atoms']}")
+sol_class = propose_solution(paths, [], splitmethod='classchange')
+print(f"  Pattern: {sol_class.raw_expr}")
+print(f"  Patterns: {sol_class.metrics['patterns']}")
 
 print("\nWith splitmethod='char':")
-sol_char = propose_solution(paths, [], SolveOptions(splitmethod='char'))
-print(f"  Pattern: {sol_char.get('raw_expr', 'N/A')}")
-print(f"  Atoms: {sol_char['metrics']['atoms']}")
+sol_char = propose_solution(paths, [], splitmethod='char')
+print(f"  Pattern: {sol_char.raw_expr}")
+print(f"  Patterns: {sol_char.metrics['patterns']}")
 
 print("\n" + "=" * 80)
 print("🎓 KEY INSIGHTS: Pattern Types")

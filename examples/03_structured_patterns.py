@@ -9,7 +9,6 @@ Demonstrates pattern generation across structured data with fields:
 
 Shows how the solver generates patterns per field and combines them.
 """
-from patternforge.engine.models import SolveOptions
 from patternforge.engine.solver import propose_solution_structured
 
 def print_structured_example(title, include_rows, exclude_rows, description=""):
@@ -22,7 +21,7 @@ def print_structured_example(title, include_rows, exclude_rows, description=""):
     solution = propose_solution_structured(
         include_rows,
         exclude_rows,
-        options=SolveOptions(splitmethod="classchange")
+        splitmethod="classchange"
     )
 
     print(f"\n📥 INPUT:")
@@ -44,46 +43,46 @@ def print_structured_example(title, include_rows, exclude_rows, description=""):
             print(f"  ... and {len(exclude_rows) - 5} more")
 
     print(f"\n📤 OUTPUT:")
-    print(f"  Expression: {solution.get('raw_expr', 'N/A')}")
+    print(f"  Expression: {solution.raw_expr}")
     print(f"\n  📊 Metrics:")
-    print(f"    Coverage:      {solution['metrics']['covered']}/{solution['metrics']['total_positive']} ({100*solution['metrics']['covered']/solution['metrics']['total_positive']:.0f}%)")
-    print(f"    False Pos:     {solution['metrics']['fp']} ✅")
-    print(f"    Patterns:      {solution['metrics']['atoms']}")
+    print(f"    Coverage:      {solution.metrics['covered']}/{solution.metrics['total_positive']} ({100*solution.metrics['covered']/solution.metrics['total_positive']:.0f}%)")
+    print(f"    False Pos:     {solution.metrics['fp']} ✅")
+    print(f"    Patterns:      {solution['metrics']['patterns']}")
     print(f"    Wildcards:     {solution['metrics']['wildcards']}")
 
-    atoms = solution.get('atoms', [])
-    print(f"\n  🎯 Pattern Analysis ({len(atoms)} patterns):")
+    patterns = solution.get('patterns', [])
+    print(f"\n  🎯 Pattern Analysis ({len(patterns)} patterns):")
 
-    # Group atoms by field
+    # Group patterns by field
     by_field = {}
-    for atom in atoms:
-        field = atom.get('field') or 'ANY'
+    for pattern in patterns:
+        field = pattern.get('field') or 'ANY'
         if field not in by_field:
             by_field[field] = []
-        by_field[field].append(atom)
+        by_field[field].append(pattern)
 
     for field_name, field_atoms in by_field.items():
         print(f"\n    📌 Field: {field_name.upper()}")
-        for i, atom in enumerate(field_atoms, 1):
-            print(f"\n      [{i}] {atom['text']}")
+        for i, pattern in enumerate(field_atoms, 1):
+            print(f"\n      [{i}] {pattern['text']}")
 
-            if atom['kind'] == 'prefix':
+            if pattern['kind'] == 'prefix':
                 print(f"          Type: PREFIX (anchored at start)")
-                print(f"          ⚓ Matches {field_name} beginning with: {atom['text'].replace('/*', '')}")
-            elif atom['kind'] == 'suffix':
+                print(f"          ⚓ Matches {field_name} beginning with: {pattern['text'].replace('/*', '')}")
+            elif pattern['kind'] == 'suffix':
                 print(f"          Type: SUFFIX (anchored at end)")
-                print(f"          ⚓ Matches {field_name} ending with: {atom['text'].replace('*/', '')}")
-            elif atom['kind'] == 'multi':
-                segments = [s for s in atom['text'].split('*') if s]
+                print(f"          ⚓ Matches {field_name} ending with: {pattern['text'].replace('*/', '')}")
+            elif pattern['kind'] == 'multi':
+                segments = [s for s in pattern['text'].split('*') if s]
                 print(f"          Type: MULTI-SEGMENT (ordered keywords)")
                 print(f"          🔗 Requires in {field_name}: {' → '.join(repr(s) for s in segments)}")
-            elif atom['kind'] == 'substring':
+            elif pattern['kind'] == 'substring':
                 print(f"          Type: SUBSTRING (flexible)")
-                print(f"          🔍 Matches {field_name} containing: {atom['text'].strip('*')}")
+                print(f"          🔍 Matches {field_name} containing: {pattern['text'].strip('*')}")
             else:
                 print(f"          Type: EXACT")
 
-            print(f"          Wildcards: {atom['wildcards']}, Matches: {atom['tp']}, FP: {atom['fp']}")
+            print(f"          Wildcards: {pattern['wildcards']}, Matches: {pattern['tp']}, FP: {pattern['fp']}")
 
 
 print("=" * 80)

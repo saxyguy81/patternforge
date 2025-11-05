@@ -16,7 +16,6 @@ import time
 import random
 sys.path.insert(0, "../src")
 
-from patternforge.engine.models import SolveOptions, OptimizeWeights, QualityMode
 from patternforge.engine.solver import propose_solution, propose_solution_structured
 
 # Set seed for reproducible benchmarks
@@ -117,13 +116,13 @@ for n in [10, 50, 100, 500, 1000, 2500, 5000, 10000]:
         propose_solution,
         include,
         exclude,
-        SolveOptions(mode=QualityMode.APPROX)
+        mode="APPROX"
     )
 
     results_single.append({
         'n': n,
         'time': elapsed,
-        'atoms': sol['metrics']['atoms'],
+        'atoms': sol['metrics']['patterns'],
         'covered': sol['metrics']['covered'],
         'fp': sol['metrics']['fp'],
     })
@@ -134,7 +133,7 @@ print("=" * 80)
 print(f"{'N':>8} {'Time (s)':>10} {'Atoms':>8} {'Coverage':>10} {'FP':>6}")
 print(f"{'-'*8} {'-'*10} {'-'*8} {'-'*10} {'-'*6}")
 for r in results_single:
-    print(f"{r['n']:>8,} {r['time']:>10.3f} {r['atoms']:>8} {r['covered']:>10} {r['fp']:>6}")
+    print(f"{r['n']:>8,} {r['time']:>10.3f} {r['patterns']:>8} {r['covered']:>10} {r['fp']:>6}")
 
 # ============================================================================
 # TEST SUITE 2: Structured Multi-Field Scaling
@@ -155,13 +154,13 @@ for n in [10, 50, 100, 500, 1000, 2500]:
         propose_solution_structured,
         include_rows,
         exclude_rows,
-        options=SolveOptions(mode=QualityMode.APPROX)
+        mode="APPROX"
     )
 
     results_structured.append({
         'n': n,
         'time': elapsed,
-        'atoms': sol['metrics']['atoms'],
+        'atoms': sol['metrics']['patterns'],
         'covered': sol['metrics']['covered'],
         'fp': sol['metrics']['fp'],
     })
@@ -177,7 +176,7 @@ print("=" * 80)
 print(f"{'N':>8} {'Time (s)':>10} {'Atoms':>8} {'Coverage':>10} {'FP':>6}")
 print(f"{'-'*8} {'-'*10} {'-'*8} {'-'*10} {'-'*6}")
 for r in results_structured:
-    print(f"{r['n']:>8,} {r['time']:>10.3f} {r['atoms']:>8} {r['covered']:>10} {r['fp']:>6}")
+    print(f"{r['n']:>8,} {r['time']:>10.3f} {r['patterns']:>8} {r['covered']:>10} {r['fp']:>6}")
 
 # ============================================================================
 # TEST SUITE 3: Quality Mode Comparison
@@ -197,7 +196,7 @@ elapsed_exact, sol_exact = benchmark(
     propose_solution,
     include,
     exclude,
-    SolveOptions(mode=QualityMode.EXACT)
+    mode="EXACT"
 )
 
 elapsed_approx, sol_approx = benchmark(
@@ -205,13 +204,13 @@ elapsed_approx, sol_approx = benchmark(
     propose_solution,
     include,
     exclude,
-    SolveOptions(mode=QualityMode.APPROX)
+    mode="APPROX"
 )
 
 print(f"\n{'Mode':<10} {'Time':>10} {'Atoms':>8} {'FP':>6} {'FN':>6}")
 print(f"{'-'*10} {'-'*10} {'-'*8} {'-'*6} {'-'*6}")
-print(f"{'EXACT':<10} {elapsed_exact:>10.3f}s {sol_exact['metrics']['atoms']:>8} {sol_exact['metrics']['fp']:>6} {sol_exact['metrics']['fn']:>6}")
-print(f"{'APPROX':<10} {elapsed_approx:>10.3f}s {sol_approx['metrics']['atoms']:>8} {sol_approx['metrics']['fp']:>6} {sol_approx['metrics']['fn']:>6}")
+print(f"{'EXACT':<10} {elapsed_exact:>10.3f}s {sol_exact['metrics']['patterns']:>8} {sol_exact['metrics']['fp']:>6} {sol_exact['metrics']['fn']:>6}")
+print(f"{'APPROX':<10} {elapsed_approx:>10.3f}s {sol_approx['metrics']['patterns']:>8} {sol_approx['metrics']['fp']:>6} {sol_approx['metrics']['fn']:>6}")
 print(f"\nSpeedup: {elapsed_exact/elapsed_approx:.2f}x faster with APPROX mode")
 
 # ============================================================================
@@ -234,13 +233,13 @@ for effort in ["low", "medium", "high"]:
         propose_solution_structured,
         include_rows,
         exclude_rows,
-        options=SolveOptions(effort=effort)
+        effort=effort
     )
 
     effort_results.append({
         'effort': effort,
         'time': elapsed,
-        'atoms': sol['metrics']['atoms'],
+        'atoms': sol['metrics']['patterns'],
         'covered': sol['metrics']['covered'],
         'fp': sol['metrics']['fp'],
     })
@@ -248,7 +247,7 @@ for effort in ["low", "medium", "high"]:
 print(f"\n{'Effort':<10} {'Time':>10} {'Atoms':>8} {'Coverage':>10} {'FP':>6}")
 print(f"{'-'*10} {'-'*10} {'-'*8} {'-'*10} {'-'*6}")
 for r in effort_results:
-    print(f"{r['effort']:<10} {r['time']:>10.3f}s {r['atoms']:>8} {r['covered']:>10} {r['fp']:>6}")
+    print(f"{r['effort']:<10} {r['time']:>10.3f}s {r['patterns']:>8} {r['covered']:>10} {r['fp']:>6}")
 
 # ============================================================================
 # TEST SUITE 5: Field Weight Impact
@@ -269,7 +268,6 @@ elapsed_default, sol_default = benchmark(
     propose_solution_structured,
     include_rows,
     exclude_rows,
-    options=SolveOptions()
 )
 
 # Prefer pin field
@@ -278,21 +276,17 @@ elapsed_weighted, sol_weighted = benchmark(
     propose_solution_structured,
     include_rows,
     exclude_rows,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_field={"pin": 3.0, "module": 1.5, "instance": 0.5}
-        )
-    )
+    w_field={"pin": 3.0, "module": 1.5, "instance": 0.5}
 )
 
-print(f"\n{'Config':<30} {'Time':>10} {'Atoms':>8} {'Pin Atoms':>12}")
+print(f"\n{'Config':<30} {'Time':>10} {'Patterns':>8} {'Pin Patterns':>12}")
 print(f"{'-'*30} {'-'*10} {'-'*8} {'-'*12}")
 
-pin_atoms_default = sum(1 for a in sol_default['atoms'] if a.get('field') == 'pin')
-pin_atoms_weighted = sum(1 for a in sol_weighted['atoms'] if a.get('field') == 'pin')
+pin_patterns_default = sum(1 for p in sol_default.patterns if p.field == 'pin')
+pin_patterns_weighted = sum(1 for p in sol_weighted.patterns if p.field == 'pin')
 
-print(f"{'Default':<30} {elapsed_default:>10.3f}s {sol_default['metrics']['atoms']:>8} {pin_atoms_default:>12}")
-print(f"{'w_field={{pin:3.0}}':<30} {elapsed_weighted:>10.3f}s {sol_weighted['metrics']['atoms']:>8} {pin_atoms_weighted:>12}")
+print(f"{'Default':<30} {elapsed_default:>10.3f}s {sol_default.metrics['patterns']:>8} {pin_patterns_default:>12}")
+print(f"{'w_field={{pin:3.0}}':<30} {elapsed_weighted:>10.3f}s {sol_weighted.metrics['patterns']:>8} {pin_patterns_weighted:>12}")
 
 # ============================================================================
 # TEST SUITE 6: Worst-Case Stress Test
@@ -315,7 +309,7 @@ elapsed_stress, sol_stress = benchmark(
     propose_solution,
     include_stress,
     exclude_stress,
-    SolveOptions(mode=QualityMode.APPROX)
+    mode="APPROX"
 )
 
 # ============================================================================
