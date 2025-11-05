@@ -27,6 +27,7 @@ class _Context:
     include_rows: Sequence[object] | None = None
     exclude_rows: Sequence[object] | None = None
     field_getter: callable | None = None
+    field_weights: dict[str, float] | None = None
 
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
@@ -77,6 +78,7 @@ def _build_candidates(ctx: _Context) -> list[Candidate]:
         per_word_multi=ctx.options.per_word_multi,
         max_multi_segments=ctx.options.max_multi_segments,
         token_iter=ctx.token_iter,
+        field_weights=ctx.field_weights,
     )
     candidates: list[Candidate] = []
     limit = ctx.options.budgets.max_candidates
@@ -659,29 +661,184 @@ def propose_solution(
 
 
 def _default_field_getter(row: object, field: str) -> str:
+    """Get field value from row and lowercase it for case-insensitive matching."""
     if isinstance(row, dict):
-        return str(row.get(field, ""))
+        return str(row.get(field, "")).lower()
     if isinstance(row, (list, tuple)):
         if field.startswith("f") and field[1:].isdigit():
             idx = int(field[1:])
-            return str(row[idx]) if idx < len(row) else ""
+            return str(row[idx]).lower() if idx < len(row) else ""
         return ""
     return ""
 
 
 def propose_solution_structured(
     include_rows: Sequence[object],
-    exclude_rows: Sequence[object],
-    options: SolveOptions,
+    exclude_rows: Sequence[object] | None = None,
+    fields: list[str] | None = None,
+    field_weights: dict[str, float] | None = None,
+    splitmethod: str | dict[str, str] = "classchange",
+    min_token_len: int = 3,
+    options: SolveOptions | None = None,
+    mode: str = "EXACT",
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
 ) -> dict[str, object]:
     """
+    Generate patterns for structured data with multiple fields.
+
+    Args:
+        include_rows: Data to match
+            - List of dicts: [{"module": "SRAM", "instance": "cpu/cache", "pin": "DIN"}]
+            - DataFrame: pd.DataFrame with columns [module, instance, pin]
+            - List of tuples: [("SRAM", "cpu/cache", "DIN")] with fields parameter
+
+        exclude_rows: Data to exclude (same format as include_rows)
+            - Use None in dict fields as wildcard (don't care)
+            - Example: {"module": None, "instance": "debug/*", "pin": None}
+
+        fields: Field names (auto-detected from dict keys or DataFrame columns)
+
+        field_weights: Prefer patterns on certain fields
+            - Higher weight = prefer patterns on this field
+            - Lower weight = discourage patterns on this field
+            - Example: {"module": 2.0, "pin": 2.0, "instance": 0.5}
+
+        splitmethod: Tokenization method
+            - String: Same method for all fields ("classchange" or "char")
+            - Dict: Per-field methods {"instance": "char", "module": "classchange"}
+
+        min_token_len: Minimum token length (default 3)
+
+        options: Advanced SolveOptions (overrides other parameters)
+
+        mode: "EXACT" (zero false positives) or "APPROX" (allow some FP)
+
+        token_iter: [Advanced] Pre-generated token iterator (auto-generated if None)
+
+        field_getter: [Advanced] Custom field getter function(row, field) -> str
+
+    Returns:
+        Solution dict with per-field patterns in 'atoms', each with 'field' attribute
+
+    Examples:
+        >>> # Simple usage with auto-detection
+        >>> include = [
+        ...     {"module": "SRAM", "instance": "cpu/cache", "pin": "DIN"},
+        ...     {"module": "SRAM", "instance": "cpu/cache", "pin": "DOUT"},
+        ... ]
+        >>> solution = propose_solution_structured(include, exclude)
+
+        >>> # With field weights
+        >>> solution = propose_solution_structured(
+        ...     include, exclude,
+        ...     field_weights={"module": 2.0, "pin": 2.0, "instance": 0.5}
+        ... )
+
+        >>> # DataFrame input
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     'module': ['SRAM', 'SRAM'],
+        ...     'instance': ['cpu/cache', 'cpu/cache'],
+        ...     'pin': ['DIN', 'DOUT']
+        ... })
+        >>> solution = propose_solution_structured(df, df_exclude)
+    """
+    from .tokens import make_split_tokenizer, iter_structured_tokens_with_fields
+
+    # Normalize input data
+    def normalize_input(rows):
+        if rows is None:
+            return []
+
+        # Already list of dicts
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return rows
+
+        # DataFrame (pandas/polars)
+        if hasattr(rows, 'to_dict'):
+            return rows.to_dict('records')
+
+        # List of tuples with field names
+        if isinstance(rows, list) and rows and isinstance(rows[0], tuple):
+            if fields is None:
+                raise ValueError("fields parameter required for tuple input")
+            return [dict(zip(fields, row)) for row in rows]
+
+        # Single dict or other - wrap in list
+        if isinstance(rows, dict):
+            return [rows]
+
+        return list(rows)
+
+    include_rows = normalize_input(include_rows)
+    exclude_rows = normalize_input(exclude_rows)
+
+    # Auto-detect fields from dict keys if not provided
+    if fields is None:
+        if include_rows and isinstance(include_rows[0], dict):
+            fields = list(include_rows[0].keys())
+        else:
+            raise ValueError("fields must be specified for non-dict rows")
+
+    # Create default options if not provided
+    if options is None:
+        from .models import QualityMode
+        quality_mode = QualityMode.EXACT if mode == "EXACT" else QualityMode.APPROX
+        options = SolveOptions(
+            mode=quality_mode,
+            splitmethod=splitmethod if isinstance(splitmethod, str) else "classchange",
+            min_token_len=min_token_len
+        )
+
+    # Generate field tokenizers from splitmethod
+    if token_iter is None:
+        if isinstance(splitmethod, str):
+            # All fields use same method
+            tokenizer = make_split_tokenizer(splitmethod, min_token_len=min_token_len)
+            field_tokenizers = {f: tokenizer for f in fields}
+        else:
+            # Per-field methods with default fallback
+            default_method = splitmethod.get("__default__", "classchange")
+            field_tokenizers = {}
+            for f in fields:
+                method = splitmethod.get(f, default_method)
+                field_tokenizers[f] = make_split_tokenizer(method, min_token_len=min_token_len)
+
+        # Generate token iterator automatically
+        token_iter = list(iter_structured_tokens_with_fields(
+            include_rows,
+            field_tokenizers,
+            field_order=fields
+        ))
+
+    # Call internal implementation
+    return _propose_solution_structured_impl(
+        include_rows,
+        exclude_rows,
+        options,
+        token_iter=token_iter,
+        field_getter=field_getter,
+        field_weights=field_weights
+    )
+
+
+def _propose_solution_structured_impl(
+    include_rows: Sequence[object],
+    exclude_rows: Sequence[object],
+    options: SolveOptions,
+    token_iter: list[tuple] | None = None,
+    field_getter: callable | None = None,
+    field_weights: dict[str, float] | None = None,
+) -> dict[str, object]:
+    """
+    Internal implementation of structured solver.
     Propose a solution over structured rows, with per-field atoms. Each atom carries a 'field'.
     - include_rows/exclude_rows: list of dicts or tuples representing fields
     - token_iter: expected to yield (row_index, Token, field_name) triples, e.g., from
       tokens.iter_structured_tokens_with_fields(...)
     - field_getter: optional function(row, field_name) -> str
+    - field_weights: optional dict mapping field names to weights (higher = prefer patterns on this field)
     """
     # In EXACT mode, automatically enforce max_fp=0 if not already set
     from .models import QualityMode, OptimizeBudgets
@@ -728,14 +885,84 @@ def propose_solution_structured(
         include_rows=include_rows,
         exclude_rows=exclude_rows,
         field_getter=field_getter or _default_field_getter,
+        field_weights=field_weights,
     )
     candidates = _build_candidates(ctx)
     selection = _greedy_select(ctx, candidates)
     # For structured solutions, never invert automatically unless requested
     base_solution = _make_solution(include, exclude, selection, options, inverted=False)
     payload = base_solution.to_json()
-    # Ensure atoms carry field; if any None slipped through, attribute by substring presence
+
+    # Recompute metrics using field-specific matching for structured data
     atoms = payload.get("atoms", [])
+    if atoms:
+        matched_mask = 0
+        for atom in atoms:
+            pattern = atom.get("text", "")
+            field = atom.get("field")
+            if field:
+                # Field-specific matching
+                for idx, row in enumerate(include_rows):
+                    value = (field_getter or _default_field_getter)(row, field)
+                    if matcher.match_pattern(value, pattern):
+                        matched_mask |= 1 << idx
+            else:
+                # Fallback to canonical string matching
+                for idx, text in enumerate(include):
+                    if matcher.match_pattern(text, pattern):
+                        matched_mask |= 1 << idx
+
+        exclude_mask = 0
+        for atom in atoms:
+            pattern = atom.get("text", "")
+            field = atom.get("field")
+            if field:
+                # Field-specific matching
+                for idx, row in enumerate(exclude_rows):
+                    value = (field_getter or _default_field_getter)(row, field)
+                    if matcher.match_pattern(value, pattern):
+                        exclude_mask |= 1 << idx
+            else:
+                # Fallback to canonical string matching
+                for idx, text in enumerate(exclude):
+                    if matcher.match_pattern(text, pattern):
+                        exclude_mask |= 1 << idx
+
+        # Update metrics with correct field-specific counts
+        matched = bitset.count_bits(matched_mask)
+        fp = bitset.count_bits(exclude_mask)
+        fn = len(include_rows) - matched
+
+        payload["metrics"]["covered"] = matched
+        payload["metrics"]["fp"] = fp
+        payload["metrics"]["fn"] = fn
+        payload["metrics"]["total_positive"] = len(include_rows)
+
+        # Update witnesses with field-specific examples
+        tp_examples = []
+        fp_examples = []
+        fn_examples = []
+        for idx in range(len(include_rows)):
+            if matched_mask & (1 << idx):
+                tp_examples.append(include[idx])
+                if len(tp_examples) >= 3:
+                    break
+        for idx in range(len(exclude_rows)):
+            if exclude_mask & (1 << idx):
+                fp_examples.append(exclude[idx])
+                if len(fp_examples) >= 3:
+                    break
+        for idx in range(len(include_rows)):
+            if not (matched_mask & (1 << idx)):
+                fn_examples.append(include[idx])
+                if len(fn_examples) >= 3:
+                    break
+
+        payload["witnesses"]["tp_examples"] = tp_examples
+        payload["witnesses"]["fp_examples"] = fp_examples
+        payload["witnesses"]["fn_examples"] = fn_examples
+
+    # Ensure atoms carry field; if any None slipped through, attribute by substring presence
     if any(a.get("field") is None for a in atoms):
         # Build fields list per row for quick lookup
         def row_fields(row: object) -> dict[str, str]:
