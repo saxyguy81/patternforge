@@ -1,151 +1,278 @@
 # PatternForge Examples
 
-This directory contains comprehensive examples demonstrating pattern generation capabilities.
+This directory contains comprehensive examples demonstrating all features of PatternForge.
 
-## Overview
+## Quick Start
 
-All examples use **EXACT mode** (default), which enforces **zero false positives** (max_fp=0).
+Run examples from this directory:
+
+```bash
+cd examples
+python3 01_quick_start.py
+```
+
+Or from the project root:
+
+```bash
+PYTHONPATH=src python3 examples/01_quick_start.py
+```
 
 ## Example Files
 
-### Basic Examples
+### 01_quick_start.py
+**Best for: First-time users**
 
-**`showcase_examples.py`** - Best introduction to pattern types
-- Example 1: Prefix + Suffix patterns working together
-- Example 2: Multi-segment patterns with ordered keywords
-- Example 3: Candidate analysis showing all pattern types
-- Shows PREFIX, SUFFIX, MULTI-SEGMENT, and SUBSTRING patterns
-- Includes candidate generation analysis
+The simplest possible examples to get started:
+- Basic single-field pattern matching
+- Basic multi-field structured matching
+- Quality modes (EXACT vs APPROX)
 
-### Advanced Examples
+Run time: < 1 second
 
-**`advanced_examples.py`** - Mixed anchored and substring patterns
-- Example 1: Mixed prefix + substring patterns
-- Example 2: Multi-segment patterns (multiple keywords required)
-- Example 3: Suffix patterns (anchored at end)
-- Example 4: Complex chip hierarchy with mixed pattern types
-- Real-world SoC scenarios with hierarchical paths
+### 02_single_field_patterns.py
+**Best for: Understanding pattern types**
 
-**`truly_advanced_examples.py`** - Complex pattern combinations
-- Example 1: Multi-segment patterns avoiding false positives
-- Example 2: Prefix + multi-segment combination
-- Example 3: Real-world complex chip with 80% compression
-- Shows power domains, NoC routers, and cache hierarchies
+Comprehensive guide to all pattern types for single-field matching:
+- PREFIX patterns (token/*)
+- SUFFIX patterns (*/token)
+- SUBSTRING patterns (*token*)
+- MULTI-SEGMENT patterns (*a*b*c*)
+- Pattern ranking and selection
+- Inverted patterns (NOT logic)
+- Tokenization methods
+- Real-world use cases
 
-**`complex_pattern_examples.py`** - Sophisticated anchored + multi-segment
-- 7 examples showing advanced pattern combinations
-- SoC memory hierarchy: `*array*sram*` multi-segment pattern
-- GPU shader units: prefix + multi-segment combo
-- NoC routers: suffix patterns for port types
-- Power domains: `*retention*ram*` | `*backup*` combination
-- I/O peripherals: 3-way pattern split
-- CPU execution units: precise multi-segment filtering
+Run time: < 5 seconds
 
-### Structured Data Examples
+### 03_structured_patterns.py
+**Best for: Multi-field data (hardware signals, databases, etc.)**
 
-**`structured_examples.py`** - Multi-field pattern generation
-- Demonstrates patterns across multiple fields (module/instance/pin)
-- Example 1: SRAM data pins (module + pin filtering)
-- Example 2: Register file read ports (instance path pattern)
-- Example 3: Clock pins with multi-segment instance pattern
-- Example 4: Memory modules with write enable (module + pin)
-- Example 5: AXI interface valid signals (multi-field combo)
-- Example 6: Scan chain outputs (three-field pattern)
-- Example 7: Clock gating cells (anchored patterns on multiple fields)
+Seven detailed examples of structured multi-field pattern generation:
+- SRAM data pins (module + pin patterns)
+- Register file ports (instance path patterns)
+- Pipeline stage clocks (multi-segment instance patterns)
+- Memory write enables (module patterns across different sizes)
+- AXI interface signals (multi-field combinations)
+- Scan chain outputs (three-field patterns)
+- Clock gating cells (anchored patterns on multiple fields)
 
-## Pattern Types
+Real-world use cases:
+- Hardware signal selection
+- Clock tree analysis
+- Power analysis
+- Scan chain generation
+- Interface validation
 
-### 1. PREFIX Patterns (`token/*`)
-- **Wildcards:** 1
-- **Anchored:** Start
-- **Score Boost:** 1.5x
-- **Best for:** Top-level hierarchy grouping
-- **Example:** `project/*` matches all project paths
+Run time: < 10 seconds
 
-### 2. SUFFIX Patterns (`*/token`)
-- **Wildcards:** 1
-- **Anchored:** End
-- **Score Boost:** 1.5x
-- **Best for:** Common endpoints
-- **Example:** `*/fifo` matches paths ending with fifo
+### 04_performance_scaling.py
+**Best for: Understanding scalability and benchmarking**
 
-### 3. MULTI-SEGMENT Patterns (`*tok1*tok2*`)
-- **Wildcards:** Variable (2n+1 for n segments)
-- **Anchored:** No
-- **Best for:** Ordered keyword requirements
-- **Example:** `*array*sram*` requires both keywords in order
+Comprehensive performance tests across various scenarios:
+- Single-field scaling (10 to 10,000 rows)
+- Structured multi-field scaling
+- Quality mode comparison (EXACT vs APPROX)
+- Effort level impact (low/medium/high)
+- Field weight impact
+- Worst-case stress tests
 
-### 4. SUBSTRING Patterns (`*token*`)
-- **Wildcards:** 2
-- **Anchored:** No
-- **Best for:** Flexible matching
-- **Example:** `*cache*` matches anywhere containing "cache"
+Generates performance tables showing:
+- Time vs dataset size
+- Algorithm selection impact
+- Memory characteristics
+- Scalability limits
 
-### 5. EXACT Patterns
-- **Wildcards:** 0
-- **Anchored:** Both
-- **Best for:** Exact match
-- **Example:** `chip/cpu/core0/cache` matches only this path
+Run time: 30-60 seconds (includes large dataset tests)
 
-## Running Examples
+## Usage Patterns
 
-```bash
-# Run any example
-python3 examples/showcase_examples.py
+### Single-Field Matching
 
-# Or with explicit PYTHONPATH
-PYTHONPATH=src python3 examples/advanced_examples.py
-```
+For simple hierarchical paths or flat strings:
 
-## Key Insights
-
-### Multi-Segment Pattern Power
 ```python
-# Problem: Select cache SRAMs, reject debug SRAMs
-*array*sram*  # Requires both "array" AND "sram" in order
-              # Avoids false positives from *sram* alone
+from patternforge.engine.models import SolveOptions
+from patternforge.engine.solver import propose_solution
+
+include = ["alpha/module1/mem/i0", "alpha/module2/io/i1"]
+exclude = ["gamma/module1/mem/i0"]
+
+solution = propose_solution(include, exclude, SolveOptions())
+print(solution["expr"])  # P1
+print(solution["raw_expr"])  # *alpha*
 ```
 
-### Anchored Pattern Efficiency
+### Structured Multi-Field Matching
+
+For data with multiple fields (module/instance/pin, etc.):
+
 ```python
-project/*     # 1 wildcard (prefix)
-*project*     # 2 wildcards (substring)
-              # Prefix is more specific!
+from patternforge.engine.models import SolveOptions, OptimizeWeights
+from patternforge.engine.solver import propose_solution_structured
+
+include_rows = [
+    {"module": "SRAM_512x64", "instance": "chip/cpu/l1_cache/bank0", "pin": "DIN[0]"},
+    {"module": "SRAM_512x64", "instance": "chip/cpu/l1_cache/bank1", "pin": "DIN[0]"},
+]
+exclude_rows = [
+    {"module": "SRAM_512x64", "instance": "chip/cpu/l2_cache/bank0", "pin": "DIN[0]"},
+]
+
+# With field preferences
+solution = propose_solution_structured(
+    include_rows,
+    exclude_rows,
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_field={"pin": 2.0, "instance": 0.5}  # Prefer pin patterns
+        )
+    )
+)
+print(solution["expr"])
 ```
 
-### Multi-Field Precision
+## Learning Path
+
+**Complete Beginner:**
+1. Start with `01_quick_start.py` - run it and read the output
+2. Read the comments to understand what each example does
+3. Try modifying the include/exclude lists to see how patterns change
+
+**Understanding Patterns:**
+1. Run `02_single_field_patterns.py`
+2. Study each example's input and output
+3. Understand when each pattern type is used
+4. Experiment with your own hierarchical paths
+
+**Multi-Field Data:**
+1. Run `03_structured_patterns.py`
+2. See how patterns work across multiple fields
+3. Learn about field weights and preferences
+4. Apply to your own structured data (hardware signals, database rows, etc.)
+
+**Performance Tuning:**
+1. Run `04_performance_scaling.py`
+2. Understand scaling characteristics
+3. Learn which settings to use for different dataset sizes
+4. Benchmark your own data
+
+## Common Workflows
+
+### Regression Triage
+
+Find patterns in failing test paths:
+
 ```python
-# Structured data: module + instance + pin
-module=*SRAM* AND instance=*cache* AND pin=WEN
-# Selects only write enable pins on SRAMs in caches
+# See: 02_single_field_patterns.py, Example 7
+include = ["regress/.../fail", ...]
+exclude = ["regress/.../pass", ...]
+solution = propose_solution(include, exclude, SolveOptions())
 ```
 
-### Pattern Combinations
+### Hardware Signal Selection
+
+Select specific signals from netlists or databases:
+
 ```python
-*retention*ram* | *backup*
-# Multi-segment for complex filtering
-# Substring for simple matching
-# Combined for complete coverage
+# See: 03_structured_patterns.py, Examples 1-7
+include_rows = [{"module": ..., "instance": ..., "pin": ...}, ...]
+solution = propose_solution_structured(include_rows, exclude_rows)
 ```
 
-## EXACT Mode Behavior
+### Log File Filtering
 
-- **Default:** mode=QualityMode.EXACT
-- **Constraint:** max_fp=0 (automatically enforced)
-- **Guarantee:** Patterns NEVER match items in exclude list
-- **Trade-off:** May achieve <100% coverage to avoid false positives
-- **Use case:** When precision is more important than recall
+Create filters for log entries:
 
-## Real-World Applications
+```python
+# See: 02_single_field_patterns.py, Examples 1-6
+include = ["2024-01-15 ERROR ...", "2024-01-16 ERROR ...", ...]
+exclude = ["2024-01-15 INFO ...", ...]
+solution = propose_solution(include, exclude, SolveOptions())
+```
 
-1. **Clock Tree Analysis:** All clock pins in specific domains
-2. **Power Analysis:** Write enables on memories in active domains
-3. **Scan Chain Generation:** Scan flops in specific modules
-4. **Interface Validation:** Protocol signals on specific interfaces
-5. **Timing Analysis:** Critical paths through specific units
+## Advanced Topics
 
-## Further Reading
+### Custom Tokenization
 
-- See `tests/test_integration.py` for integration test examples
-- Check `src/patternforge/engine/candidates.py` for pattern generation logic
-- Review `src/patternforge/engine/solver.py` for greedy selection algorithm
+See the main README.md for examples of custom tokenizers and per-field tokenization.
+
+### Inverted Patterns
+
+Use `InvertStrategy.ALWAYS` to get "everything EXCEPT pattern":
+
+```python
+from patternforge.engine.models import InvertStrategy
+solution = propose_solution(
+    include, exclude,
+    SolveOptions(invert=InvertStrategy.ALWAYS)
+)
+# Solution now represents: "everything EXCEPT <pattern>"
+```
+
+### Percentage Budgets
+
+Allow a percentage of false positives instead of absolute counts:
+
+```python
+from patternforge.engine.models import OptimizeBudgets
+solution = propose_solution(
+    include, exclude,
+    SolveOptions(
+        budgets=OptimizeBudgets(
+            max_fp=0.01,  # Allow 1% FP
+            max_atoms=0.10  # Use at most 10% of rows as atoms
+        )
+    )
+)
+```
+
+### Per-Field Cost Functions
+
+Customize cost function per field:
+
+```python
+from patternforge.engine.models import OptimizeWeights
+solution = propose_solution_structured(
+    include_rows, exclude_rows,
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_fp={"module": 2.0, "pin": 1.0},  # Per-field FP cost
+            w_fn=1.0,  # Global FN cost
+        )
+    )
+)
+```
+
+## Troubleshooting
+
+**Patterns are too broad:**
+- Use EXACT mode instead of APPROX
+- Add more exclude examples
+- Increase field weights for specific fields (structured mode)
+- Decrease max_fp budget
+
+**Patterns are too specific (too many atoms):**
+- Use APPROX mode
+- Decrease max_atoms budget
+- Adjust cost function weights (increase w_atom penalty)
+
+**Too slow:**
+- Use APPROX mode
+- Use effort="low"
+- Consider dataset size (> 10k rows may be slow in EXACT mode)
+
+**Wrong fields selected (structured mode):**
+- Adjust w_field weights to prefer/discourage specific fields
+- Example: `w_field={"pin": 2.0, "instance": 0.3}`
+
+## Next Steps
+
+After working through the examples:
+1. Read the **USER_GUIDE.md** for comprehensive documentation
+2. Check the **README.md** for CLI usage
+3. See the **STRUCTURED_SOLVER_GUIDE.md** for multi-field advanced features
+4. Explore the test suite in `tests/` for more usage patterns
+
+## Contributing Examples
+
+If you have interesting use cases, please contribute examples via pull request!

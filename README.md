@@ -2,6 +2,12 @@
 
 Fast, deterministic glob-pattern discovery & human-readable explanations for hierarchical names.
 
+## Documentation
+
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Comprehensive user guide with examples and best practices
+- **[STRUCTURED_SOLVER_GUIDE.md](STRUCTURED_SOLVER_GUIDE.md)** - Deep dive into multi-field pattern matching
+- **[examples/](examples/)** - Runnable examples (quick start, patterns, performance tests)
+
 ## Quick Start
 
 CLI in 60 seconds:
@@ -601,27 +607,50 @@ loaded = io.load_solution("solve.json")
 
 ### Optimization knobs (SolveOptions)
 
+**For comprehensive documentation, see [USER_GUIDE.md](USER_GUIDE.md)**
+
 - Quality
   - `mode`: `EXACT` explores deeper combinations and favors precise atoms; `APPROX` is faster, with a shallower search.
+  - `effort`: `"low"`, `"medium"` (default), `"high"`, or `"exhaustive"` - controls quality vs speed trade-off
   - `invert`: `auto` evaluates both non-inverted and inverted coverage and chooses lower cost; `never` forces non-inverted; `always` returns the inverted selection.
+
 - Budgets (`options.budgets`) control the search frontier and expression size
   - `max_candidates`: upper bound on ranked candidate atoms considered (default 4000)
-  - `max_atoms`: cap on atoms included in the final expression
-  - `max_ops`: cap on boolean operations in the final expression
-  - `depth`: internal exploration depth (higher in `EXACT`)
+  - `max_atoms`: cap on atoms in the final expression (int or 0<float<1 for percentage)
   - `max_multi_segments`: max segments in multi-wildcard atoms like `*a*b*c*` (limits combinatorics)
-  - `max_fp`, `max_fn`: optional hard stops that prune worse-than-threshold solutions early
+  - `max_fp`, `max_fn`: optional hard stops (int or 0<float<1 for percentage) that prune worse-than-threshold solutions early
+
 - Weights (`options.weights`) tune the cost function used by the greedy selector
   - `w_fp`, `w_fn`: penalty for false positives/negatives (dominant factors)
   - `w_atom`, `w_op`: penalize long expressions with many atoms/boolean ops
   - `w_wc`: penalize many wildcards (encourages more specific tokens)
   - `w_len`: penalize longer non-`*` characters (nudges toward concise patterns)
+  - `w_field`: field preference for structured data (dict mapping field names to weights)
+  - **NEW:** All weights can be scalar OR dict for per-field customization
+
 - Tokenization / candidate generation
-  - `splitmethod`: `classchange` chunks by character class; `char` uses the whole string as a single token
+  - `splitmethod`: `classchange` chunks by character class; `char` uses specific separators
   - `min_token_len`: discard tokens shorter than this
   - `per_word_substrings`: top N per-token substrings to consider as `*tok*` atoms
-  - `per_word_multi`: per-word combinations for multi-segment atoms
   - `max_multi_segments`: limit segments in multi-wildcard atoms
+
+**Example:**
+```python
+from patternforge.engine.models import SolveOptions, OptimizeWeights, OptimizeBudgets
+
+options = SolveOptions(
+    mode=QualityMode.EXACT,
+    effort="high",
+    weights=OptimizeWeights(
+        w_fp=2.0,           # Penalize false positives heavily
+        w_field={"pin": 3.0, "instance": 0.5}  # Prefer pin patterns (structured)
+    ),
+    budgets=OptimizeBudgets(
+        max_atoms=8,        # At most 8 atoms
+        max_fp=0.01,        # Allow 1% false positives
+    )
+)
+```
 
 ### Advanced: custom tokenizers (per-field)
 
