@@ -6,7 +6,7 @@ The structured solver generates conjunctive expressions (multi-field patterns) f
 
 ### Key Concepts
 
-**Terminology** (user-requested clarity):
+**Terminology**:
 - **Term**: A single field pattern (e.g., `module: *sram*`)
 - **Expression**: A conjunction of terms (e.g., `(module: *sram*) & (instance: *cpu*)`)
 - **Solution**: A disjunction of expressions (e.g., `expr1 | expr2`)
@@ -43,33 +43,23 @@ solution = propose_solution_structured(include, exclude)
 Prefer patterns on certain fields and customize parameters per field.
 
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeWeights
-
 # Field preference weights (multiplies pattern scores during candidate generation)
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_field={
-                "module": 2.0,      # High priority
-                "pin": 2.0,         # High priority
-                "instance": 0.5     # Low priority (discourage)
-            }
-        )
-    )
+    w_field={
+        "module": 2.0,      # High priority
+        "pin": 2.0,         # High priority
+        "instance": 0.5     # Low priority (discourage)
+    }
 )
 # Will prefer patterns on module/pin rather than instance
 
 # All weights can be per-field! Unspecified fields default to 1.0
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_fp={"module": 2.0, "pin": 1.0, "instance": 0.5},  # Per-field FP cost
-            w_fn=1.0,                                             # Global FN cost
-            w_atom={"pin": 0.1, "module": 0.05},                 # Per-field atom cost
-        )
-    )
+    w_fp={"module": 2.0, "pin": 1.0, "instance": 0.5},  # Per-field FP cost
+    w_fn=1.0,                                             # Global FN cost
+    w_pattern={"pin": 0.1, "module": 0.05},              # Per-field pattern cost
 )
 ```
 
@@ -78,22 +68,18 @@ solution = propose_solution_structured(
 Different tokenization methods for different fields.
 
 ```python
-from patternforge.engine.models import SolveOptions
-
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        splitmethod={
-            "instance": "char",        # Split on / for paths
-            "module": "classchange",   # Split on case changes
-            "pin": "char"             # Split on [ and ]
-        },
-        min_token_len={              # Can also be per-field!
-            "instance": 2,
-            "module": 3,
-            "pin": 2
-        }
-    )
+    splitmethod={
+        "instance": "char",        # Split on / for paths
+        "module": "classchange",   # Split on case changes
+        "pin": "char"             # Split on [ and ]
+    },
+    min_token_len={              # Can also be per-field!
+        "instance": 2,
+        "module": 3,
+        "pin": 2
+    }
 )
 ```
 
@@ -149,30 +135,20 @@ solution = propose_solution_structured(df, df_exclude)
 Specify constraints as percentages or absolute counts.
 
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeBudgets
-
 # Allow up to 1% false positives
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        budgets=OptimizeBudgets(
-            max_fp=0.01,     # 1% of include rows
-            max_fn=0.0,      # 0 false negatives (exact)
-            max_atoms=0.10   # Use at most 10% of rows as atoms
-        )
-    )
+    max_fp=0.01,     # 1% of include rows
+    max_fn=0.0,      # 0 false negatives (exact)
+    max_patterns=0.10   # Use at most 10% of rows as patterns
 )
 
 # Or use absolute counts
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        budgets=OptimizeBudgets(
-            max_fp=5,        # At most 5 false positives
-            max_fn=None,     # No limit on false negatives
-            max_atoms=8      # At most 8 atoms
-        )
-    )
+    max_fp=5,        # At most 5 false positives
+    max_fn=None,     # No limit on false negatives
+    max_patterns=8   # At most 8 patterns
 )
 ```
 
@@ -195,32 +171,30 @@ Automatically selects best algorithm based on dataset size.
 Control complexity vs quality trade-off.
 
 ```python
-from patternforge.engine.models import SolveOptions
-
 # Fast mode - for quick results
 solution = propose_solution_structured(
     large_dataset,  # 10k rows
     large_excludes,
-    options=SolveOptions(effort="low")  # O(N), single-field only, ~1s
+    effort="low"  # O(N), single-field only, ~1s
 )
 
 # Default - balanced
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(effort="medium")  # Adaptive, multi-field when needed
+    effort="medium"  # Adaptive, multi-field when needed
 )
 
 # Best quality - for important use cases
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(effort="high")  # More candidates, multi-field, ~10x slower
+    effort="high"  # More candidates, multi-field, ~10x slower
 )
 
 # Exhaustive - try everything (small datasets only)
 solution = propose_solution_structured(
     tiny_include,   # < 100 rows
     tiny_exclude,
-    options=SolveOptions(effort="exhaustive")  # O(N²), all combinations
+    effort="exhaustive"  # O(N²), all combinations
 )
 ```
 
@@ -265,62 +239,55 @@ Add second field: (module: *SRAM*) & (instance: *cpu*) → 4 TP, 0 FP
 
 ## Complete API Reference
 
-### Simplified API
+### Function Signature
 ```python
 def propose_solution_structured(
     include_rows,           # Data to match (list of dicts or DataFrame)
     exclude_rows=None,      # Data to exclude
     fields=None,            # Auto-detected from dict keys
-    options=None,           # SolveOptions with all configuration
     token_iter=None,        # Advanced: pre-generated tokens
     field_getter=None,      # Advanced: custom field extraction
-) -> dict
+    **kwargs                # All configuration parameters
+) -> Solution
 ```
 
-### SolveOptions Structure
+### Configuration Parameters
+
+All parameters from `propose_solution()` are supported. See USER_GUIDE.md Configuration Reference for complete details.
+
+**Key parameters for structured data:**
+
 ```python
-from patternforge.engine.models import (
-    SolveOptions,
-    OptimizeWeights,
-    OptimizeBudgets,
-    QualityMode,
-    InvertStrategy
-)
+solution = propose_solution_structured(
+    include_rows, exclude_rows,
 
-options = SolveOptions(
-    # Core settings
-    mode=QualityMode.EXACT,      # EXACT (0 FP) or APPROX
-    effort="medium",             # "low", "medium", "high", "exhaustive"
+    # Quality & Mode
+    mode="EXACT",              # or "APPROX" (case-insensitive)
+    effort="medium",           # "low", "medium", "high", "exhaustive"
 
-    # Tokenization (can be dict for per-field)
-    splitmethod="classchange",   # str or {"field": "method"}
-    min_token_len=3,             # int or {"field": int}
+    # Tokenization (per-field supported)
+    splitmethod="classchange",  # str or {"field": "method"}
+    min_token_len=3,            # int or {"field": int}
 
-    # Candidate generation
-    per_word_substrings=16,      # Substrings per token
-    max_multi_segments=3,        # Multi-segment pattern limit
+    # Budget constraints
+    max_candidates=4000,
+    max_patterns=None,          # int or 0<float<1 for %
+    max_fp=0,                   # int or 0<float<1 for %
+    max_fn=None,                # int or 0<float<1 for %
 
-    # Optimization weights (all can be dict for per-field)
-    weights=OptimizeWeights(
-        w_field={"pin": 2.0, "module": 1.5},  # Field preference (always dict)
-        w_fp=1.0,                              # False positive cost
-        w_fn=1.0,                              # False negative cost
-        w_atom=0.05,                           # Atom complexity cost
-        w_op=0.02,                             # Operator complexity cost
-        w_wc=0.01,                             # Wildcard cost
-        w_len=0.001,                           # Length cost
-    ),
+    # Weights (all can be per-field)
+    w_field={"pin": 2.0},       # Field preference (always dict)
+    w_fp=1.0,                   # False positive cost (scalar or dict)
+    w_fn=1.0,                   # False negative cost (scalar or dict)
+    w_pattern=0.05,             # Pattern complexity cost
+    w_op=0.02,                  # Operator cost
+    w_wc=0.01,                  # Wildcard cost
+    w_len=0.001,                # Length cost
 
-    # Hard constraints
-    budgets=OptimizeBudgets(
-        max_candidates=4000,       # Max candidates to consider
-        max_atoms=8,               # Max atoms (int or 0<float<1 for %)
-        max_fp=0,                  # Max FP (int or 0<float<1 for %)
-        max_fn=None,               # Max FN (int or 0<float<1 for %)
-    ),
-
-    # Single-field specific (structured solver ignores these)
-    invert=InvertStrategy.AUTO,
+    # Pattern generation
+    per_word_substrings=16,
+    max_multi_segments=3,
+    allowed_patterns=None,      # ["prefix", "suffix", etc.]
     allow_complex_expressions=False,
 )
 ```
@@ -337,16 +304,10 @@ solution = propose_solution_structured(include, exclude)
 
 ### Pattern 2: Field Weights + Per-Field Tokenization
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeWeights
-
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_field={"module": 2.0, "pin": 2.0, "instance": 0.3}
-        ),
-        splitmethod={"instance": "char", "module": "classchange"}
-    )
+    w_field={"module": 2.0, "pin": 2.0, "instance": 0.3},
+    splitmethod={"instance": "char", "module": "classchange"}
 )
 ```
 
@@ -366,30 +327,22 @@ solution = propose_solution_structured(df_include, df_exclude)
 
 ### Pattern 4: Large Dataset with Low Effort
 ```python
-from patternforge.engine.models import SolveOptions
-
 # 50k rows - use fast mode
 solution = propose_solution_structured(
     large_data,
     large_excludes,
-    options=SolveOptions(effort="low")  # Single-field only, very fast
+    effort="low"  # Single-field only, very fast
 )
 ```
 
 ### Pattern 5: Critical Use Case with High Effort
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeWeights
-
 # Important signals - use best quality
 solution = propose_solution_structured(
     critical_signals,
     all_other_signals,
-    options=SolveOptions(
-        effort="high",
-        weights=OptimizeWeights(
-            w_field={"module": 3.0, "pin": 3.0}
-        )
-    )
+    effort="high",
+    w_field={"module": 3.0, "pin": 3.0}
 )
 ```
 
@@ -435,14 +388,13 @@ solution = propose_solution_structured(
 ```python
 # Old (manual tokenizer setup)
 from patternforge.engine.tokens import make_split_tokenizer, iter_structured_tokens_with_fields
-from patternforge.engine.models import SolveOptions
 
 tokenizer = make_split_tokenizer("classchange", min_token_len=3)
 field_tokenizers = {"module": tokenizer, "instance": tokenizer, "pin": tokenizer}
 token_iter = list(iter_structured_tokens_with_fields(...))
 solution = propose_solution_structured(
     include, exclude,
-    SolveOptions(splitmethod="classchange"),
+    splitmethod="classchange",
     token_iter=token_iter
 )
 ```
@@ -454,48 +406,34 @@ solution = propose_solution_structured(include, exclude)
 
 ### Enabling New Features
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeWeights, OptimizeBudgets
-
 # Add field weights
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_field={"pin": 2.0}  # NEW!
-        )
-    )
+    w_field={"pin": 2.0}  # Direct parameter!
 )
 
 # Add effort control
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(effort="high")  # NEW!
+    effort="high"  # Direct parameter!
 )
 
 # Add percentage budgets
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        budgets=OptimizeBudgets(
-            max_fp=0.01,  # 1% FP allowed - NEW!
-            max_atoms=0.10  # 10% of rows max - NEW!
-        )
-    )
+    max_fp=0.01,        # 1% FP allowed - direct!
+    max_patterns=0.10   # 10% of rows max - direct!
 )
 
 # Use None wildcards in excludes
-exclude = [{"module": None, "instance": "debug/*", "pin": None}]  # NEW!
+exclude = [{"module": None, "instance": "debug/*", "pin": None}]
 solution = propose_solution_structured(include, exclude)
 
 # Per-field weights for cost function
 solution = propose_solution_structured(
     include, exclude,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_fp={"module": 2.0, "pin": 1.0},  # NEW! Per-field FP cost
-            w_atom=0.05  # Global atom cost
-        )
-    )
+    w_fp={"module": 2.0, "pin": 1.0},  # Per-field FP cost!
+    w_pattern=0.05  # Global pattern cost
 )
 ```
 
@@ -532,7 +470,6 @@ solution = propose_solution_structured(
 
 ```python
 from patternforge.engine.solver import propose_solution_structured
-from patternforge.engine.models import SolveOptions, OptimizeWeights
 import pandas as pd
 import numpy as np
 
@@ -550,33 +487,29 @@ df_exclude = pd.DataFrame({
     'pin': [np.nan, np.nan, 'CLK'],
 })
 
-# Generate solution with all features
+# Generate solution with all features - no classes needed!
 solution = propose_solution_structured(
     df_include,
     df_exclude,
-    options=SolveOptions(
-        effort="high",
-        weights=OptimizeWeights(
-            w_field={"module": 1.5, "pin": 2.0, "instance": 0.5}
-        ),
-        splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
-    )
+    effort="high",
+    w_field={"module": 1.5, "pin": 2.0, "instance": 0.5},
+    splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
 )
 
-print(f"Expression: {solution['raw_expr']}")
-print(f"Coverage: {solution['metrics']['covered']}/{solution['metrics']['total_positive']}")
-print(f"FP: {solution['metrics']['fp']}")
-print(f"Expressions: {len(solution['expressions'])}")
+print(f"Expression: {solution.raw_expr}")
+print(f"Coverage: {solution.metrics['covered']}/{solution.metrics['total_positive']}")
+print(f"FP: {solution.metrics['fp']}")
+print(f"Expressions: {len(solution.expressions)}")
 ```
 
 ## Summary
 
 The structured solver now features:
 ✅ Expression-based generation (multi-field patterns)
-✅ Field weights (prefer certain fields) - now via w_field
-✅ Per-field tokenization (splitmethod, min_token_len)
-✅ Per-field cost function weights (w_fp, w_fn, w_atom, etc. can all be dicts)
-✅ Percentage-based budgets (max_fp=0.01 for 1% FP rate)
+✅ Field weights (prefer certain fields) - now via `w_field` parameter
+✅ Per-field tokenization (`splitmethod`, `min_token_len`)
+✅ Per-field cost function weights (`w_fp`, `w_fn`, `w_pattern`, etc. can all be dicts)
+✅ Percentage-based budgets (`max_fp=0.01` for 1% FP rate)
 ✅ None/NaN wildcards
 ✅ DataFrame support
 ✅ Adaptive algorithm selection
@@ -584,7 +517,7 @@ The structured solver now features:
 ✅ Scalable to 100k rows
 ✅ Multi-field lazy construction
 ✅ O(N) complexity for large datasets
-✅ Unified SolveOptions API (single-field and multi-field)
+✅ **Unified kwargs API** - no more nested classes!
 
-**API Update**: The API has been unified and simplified. All configuration now goes through `SolveOptions`, with `w_field` replacing `field_weights` and all weights supporting per-field customization.
+**API Update**: The API has been simplified. All configuration now uses direct keyword arguments. No need to import or construct `SolveOptions`, `OptimizeWeights`, or `OptimizeBudgets` - just pass parameters directly!
 

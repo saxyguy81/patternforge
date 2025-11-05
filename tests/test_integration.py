@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import unittest
 
-from patternforge.engine.models import SolveOptions
 from patternforge.engine.solver import propose_solution
 
 
@@ -27,24 +26,24 @@ class TestPatternforgeIntegration(unittest.TestCase):
         ]
 
         # Use patternforge with empty exclude list
-        solution = propose_solution(instance_list, [], SolveOptions(splitmethod="char"))
+        solution = propose_solution(instance_list, [], splitmethod="char")
 
         # Extract patterns from solution
-        atoms = solution.get("atoms", [])
-        patterns = [atom["text"] for atom in atoms]
+        patterns = solution.patterns
+        patterns = [pattern.text for pattern in patterns]
 
         print(f"\nInput instances: {len(instance_list)}")
         print(f"Generated patterns: {patterns}")
         print(f"Number of patterns: {len(patterns)}")
-        print(f"Expression: {solution.get('expr', '')}")
-        print(f"Metrics: {solution.get('metrics', {})}")
+        print(f"Expression: {solution.expr}")
+        print(f"Metrics: {solution.metrics}")
 
         # Verify we get reasonable compression
         self.assertLessEqual(len(patterns), len(instance_list))
         # Verify the solution covers all inputs
-        self.assertEqual(solution["metrics"]["covered"], len(instance_list))
-        self.assertEqual(solution["metrics"]["fp"], 0)
-        self.assertEqual(solution["metrics"]["fn"], 0)
+        self.assertEqual(solution.metrics["covered"], len(instance_list))
+        self.assertEqual(solution.metrics["fp"], 0)
+        self.assertEqual(solution.metrics["fn"], 0)
 
     def test_real_world_28_instances(self):
         """Test patternforge with real-world 28-instance list"""
@@ -84,28 +83,28 @@ class TestPatternforgeIntegration(unittest.TestCase):
 
         # Use patternforge with exclude list
         solution = propose_solution(
-            instance_list, exclude_words, SolveOptions(splitmethod="char")
+            instance_list, exclude_words, splitmethod="char"
         )
 
         # Extract patterns from solution
-        atoms = solution.get("atoms", [])
-        patterns = [atom["text"] for atom in atoms]
+        patterns = solution.patterns
+        patterns = [pattern.text for pattern in patterns]
 
         print(f"\nInput instances: {len(instance_list)}")
         print("Generated patterns:")
         for i, pattern in enumerate(sorted(patterns), 1):
             print(f"  {i}. {pattern}")
         print(f"Number of patterns: {len(patterns)}")
-        print(f"Expression: {solution.get('expr', '')}")
-        print(f"Metrics: {solution.get('metrics', {})}")
+        print(f"Expression: {solution.expr}")
+        print(f"Metrics: {solution.metrics}")
 
         # Verify we get good compression (should be much less than 28)
         self.assertLessEqual(len(patterns), 10)
         # Verify the solution provides good coverage (at least 80%)
-        coverage_ratio = solution["metrics"]["covered"] / len(instance_list)
+        coverage_ratio = solution.metrics["covered"] / len(instance_list)
         self.assertGreaterEqual(coverage_ratio, 0.8)
         # Verify low false positives
-        self.assertLessEqual(solution["metrics"]["fp"], len(exclude_words))
+        self.assertLessEqual(solution.metrics["fp"], len(exclude_words))
 
     def test_longest(self):
         """Test patternforge with very long instance paths"""
@@ -130,28 +129,28 @@ class TestPatternforgeIntegration(unittest.TestCase):
 
         # Use patternforge with exclude list (only showing first 10 instances for brevity)
         solution = propose_solution(
-            instance_list, exclude_words, SolveOptions(splitmethod="char")
+            instance_list, exclude_words, splitmethod="char"
         )
 
         # Extract patterns from solution
-        atoms = solution.get("atoms", [])
-        patterns = [atom["text"] for atom in atoms]
+        patterns = solution.patterns
+        patterns = [pattern.text for pattern in patterns]
 
         print(f"\nInput instances: {len(instance_list)}")
         print("Generated patterns:")
         for i, pattern in enumerate(sorted(patterns), 1):
             print(f"  {i}. {pattern}")
         print(f"Number of patterns: {len(patterns)}")
-        print(f"Expression: {solution.get('expr', '')}")
-        print(f"Metrics: {solution.get('metrics', {})}")
+        print(f"Expression: {solution.expr}")
+        print(f"Metrics: {solution.metrics}")
 
         # Verify we get compression
         self.assertLessEqual(len(patterns), len(instance_list))
         # Verify the solution provides reasonable coverage (at least 70%)
-        coverage_ratio = solution["metrics"]["covered"] / len(instance_list)
+        coverage_ratio = solution.metrics["covered"] / len(instance_list)
         self.assertGreaterEqual(coverage_ratio, 0.7)
         # Verify low false positives
-        self.assertLessEqual(solution["metrics"]["fp"], len(exclude_words))
+        self.assertLessEqual(solution.metrics["fp"], len(exclude_words))
 
     def test_multiple_distinct_groups(self):
         """Test patternforge with multiple distinct module types"""
@@ -167,25 +166,25 @@ class TestPatternforgeIntegration(unittest.TestCase):
             "pd_domain/moduleC/sub3/PATTERN_C/mem/i0",
         ]
 
-        solution = propose_solution(instance_list, [], SolveOptions(splitmethod="char"))
+        solution = propose_solution(instance_list, [], splitmethod="char")
 
         # Extract patterns from solution
-        atoms = solution.get("atoms", [])
-        patterns = [atom["text"] for atom in atoms]
+        patterns = solution.patterns
+        patterns = [pattern.text for pattern in patterns]
 
         print(f"\nInput instances: {len(instance_list)}")
         print("Generated patterns:")
         for i, pattern in enumerate(sorted(patterns), 1):
             print(f"  {i}. {pattern}")
         print(f"Number of patterns: {len(patterns)}")
-        print(f"Expression: {solution.get('expr', '')}")
-        print(f"Metrics: {solution.get('metrics', {})}")
+        print(f"Expression: {solution.expr}")
+        print(f"Metrics: {solution.metrics}")
 
         # Should compress to a small number of patterns
         self.assertLessEqual(len(patterns), 5)
         # Verify the solution covers all inputs
-        self.assertEqual(solution["metrics"]["covered"], len(instance_list))
-        self.assertEqual(solution["metrics"]["fp"], 0)
+        self.assertEqual(solution.metrics["covered"], len(instance_list))
+        self.assertEqual(solution.metrics["fp"], 0)
 
     def test_splitmethod_comparison(self):
         """Compare 'char' vs 'classchange' splitmethod"""
@@ -197,37 +196,37 @@ class TestPatternforgeIntegration(unittest.TestCase):
         ]
 
         solution_char = propose_solution(
-            instance_list, [], SolveOptions(splitmethod="char")
+            instance_list, [], splitmethod="char"
         )
         solution_classchange = propose_solution(
-            instance_list, [], SolveOptions(splitmethod="classchange")
+            instance_list, [], splitmethod="classchange"
         )
 
         # Extract patterns from solutions
-        atoms_char = solution_char.get("atoms", [])
-        patterns_char = [atom["text"] for atom in atoms_char]
+        atoms_char = solution_char.patterns
+        patterns_char = [pattern.text for pattern in atoms_char]
 
-        atoms_classchange = solution_classchange.get("atoms", [])
-        patterns_classchange = [atom["text"] for atom in atoms_classchange]
+        atoms_classchange = solution_classchange.patterns
+        patterns_classchange = [pattern.text for pattern in atoms_classchange]
 
         print(f"\nInput instances: {len(instance_list)}")
         print("\nPatterns with splitmethod='char':")
         for pattern in sorted(patterns_char):
             print(f"  {pattern}")
-        print(f"Expression: {solution_char.get('expr', '')}")
+        print(f"Expression: {solution_char.expr}")
 
         print("\nPatterns with splitmethod='classchange':")
         for pattern in sorted(patterns_classchange):
             print(f"  {pattern}")
-        print(f"Expression: {solution_classchange.get('expr', '')}")
+        print(f"Expression: {solution_classchange.expr}")
 
         # Both should provide good compression
         self.assertLessEqual(len(patterns_char), len(instance_list))
         self.assertLessEqual(len(patterns_classchange), len(instance_list))
 
         # Both should cover all inputs
-        self.assertEqual(solution_char["metrics"]["covered"], len(instance_list))
-        self.assertEqual(solution_classchange["metrics"]["covered"], len(instance_list))
+        self.assertEqual(solution_char.metrics["covered"], len(instance_list))
+        self.assertEqual(solution_classchange.metrics["covered"], len(instance_list))
 
 
 if __name__ == "__main__":

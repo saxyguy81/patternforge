@@ -220,7 +220,7 @@ solution = propose_solution(
     SolveOptions(
         budgets=OptimizeBudgets(
             max_fp=0.01,  # Allow 1% FP
-            max_atoms=0.10  # Use at most 10% of rows as atoms
+            max_patterns=0.10  # Use at most 10% of rows as atoms
         )
     )
 )
@@ -253,8 +253,8 @@ solution = propose_solution_structured(
 
 **Patterns are too specific (too many atoms):**
 - Use APPROX mode
-- Decrease max_atoms budget
-- Adjust cost function weights (increase w_atom penalty)
+- Decrease max_patterns budget
+- Adjust cost function weights (increase w_pattern penalty)
 
 **Too slow:**
 - Use APPROX mode

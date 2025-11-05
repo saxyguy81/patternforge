@@ -89,15 +89,21 @@ def load_solution(path: str) -> dict:
         return json.load(handle)
 
 
-def save_solution(solution: dict, path: str) -> None:
+def save_solution(solution, path: str) -> None:
+    """Save solution to JSON file. Accepts either Solution object or dict."""
+    from .engine.models import Solution
+    data = solution.to_json() if isinstance(solution, Solution) else solution
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(solution, handle, indent=2, sort_keys=True)
+        json.dump(data, handle, indent=2, sort_keys=True)
         handle.write("\n")
 
 
-def write_json(obj: dict, path: str) -> None:
+def write_json(obj, path: str) -> None:
+    """Write object to JSON. Accepts Solution object or dict."""
+    from .engine.models import Solution
+    data = obj.to_json() if isinstance(obj, Solution) else obj
     if path == "-":
-        json.dump(obj, os.sys.stdout, indent=2, sort_keys=True)
+        json.dump(data, os.sys.stdout, indent=2, sort_keys=True)
         os.sys.stdout.write("\n")
         os.sys.stdout.flush()
         return

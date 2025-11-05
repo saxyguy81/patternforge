@@ -61,8 +61,8 @@ def test_cli_evaluate_explain_and_summarize(
         ]
     )
     solution = json.loads(solution_path.read_text())
-    atoms_file = tmp_path / "atoms.json"
-    atoms_file.write_text(json.dumps({"atoms": solution["atoms"]}))
+    atoms_file = tmp_path / "patterns.json"
+    atoms_file.write_text(json.dumps({"patterns": solution["patterns"]}))
 
     cli.main(
         [
@@ -73,7 +73,7 @@ def test_cli_evaluate_explain_and_summarize(
             str(exclude),
             "--expr",
             solution["expr"],
-            "--atoms",
+            "--patterns",
             str(atoms_file),
             "--format",
             "json",
@@ -109,28 +109,10 @@ def test_patternforge_main_entrypoint(
     assert capfd.readouterr().out
 
 
-def test_cli_rectangles_and_dump(
+def test_cli_dump_candidates(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     include = _write(tmp_path / "include.txt", "alpha/x\nalpha/y\nbeta/z\n")
-    cli.main(
-        [
-            "plan-rectangles",
-            "--include",
-            str(include),
-            "--rect-budget",
-            "2",
-            "--rect-penalty",
-            "1.0",
-            "--exception-weight",
-            "1.0",
-            "--format",
-            "json",
-        ]
-    )
-    plan = json.loads(capfd.readouterr().out)
-    assert plan["rectangles"]
-
     cli.main(
         [
             "dump-candidates",
@@ -174,25 +156,6 @@ def test_cli_propose_text_with_schema(
     )
     text = capfd.readouterr().out
     assert "EXPR:" in text
-
-
-def test_cli_rectangles_text(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    include = _write(tmp_path / "include.txt", "alpha/x\nbeta/y\n")
-    cli.main(
-        [
-            "plan-rectangles",
-            "--include",
-            str(include),
-            "--rect-budget",
-            "1",
-            "--format",
-            "text",
-        ]
-    )
-    output = capfd.readouterr().out
-    assert "alpha" in output or "beta" in output
 
 
 def test_parse_invert_errors() -> None:

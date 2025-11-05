@@ -2,27 +2,20 @@
 
 import pytest
 
-from patternforge.engine.models import (
-    InvertStrategy,
-    OptimizeBudgets,
-    OptimizeWeights,
-    QualityMode,
-    SolveOptions,
-)
 from patternforge.engine.solver import evaluate_expr, propose_solution
 
 
-def _options(invert: InvertStrategy = InvertStrategy.NEVER) -> SolveOptions:
-    return SolveOptions(
-        mode=QualityMode.EXACT,
-        invert=invert,
-        weights=OptimizeWeights(),
-        budgets=OptimizeBudgets(max_candidates=128, max_atoms=8),
-        min_token_len=3,
-        per_word_substrings=8,
-        max_multi_segments=3,
-        splitmethod="classchange",
-    )
+# Default test options as kwargs
+DEFAULT_TEST_OPTIONS = {
+    "mode": "EXACT",
+    "invert": "never",
+    "max_candidates": 128,
+    "max_patterns": 8,
+    "min_token_len": 3,
+    "per_word_substrings": 8,
+    "max_multi_segments": 3,
+    "splitmethod": "classchange",
+}
 
 
 def test_propose_solution_generates_atoms() -> None:
@@ -32,24 +25,27 @@ def test_propose_solution_generates_atoms() -> None:
         "alpha/module3/io/i1",
     ]
     exclude = ["beta/module1/mem/i0"]
-    solution = propose_solution(include, exclude, _options())
-    assert solution["expr"]
-    assert solution["metrics"]["total_positive"] == 3
-    assert solution["metrics"]["covered"] <= 3
-    assert solution["atoms"]
+    solution = propose_solution(include, exclude, **DEFAULT_TEST_OPTIONS)
+    assert solution.expr
+    assert solution.metrics["total_positive"] == 3
+    assert solution.metrics["covered"] <= 3
+    assert solution.patterns
 
 
 def test_propose_solution_inversion() -> None:
     include = ["one"]
     exclude = ["one", "two", "three"]
-    solution = propose_solution(include, list(exclude), _options(invert=InvertStrategy.ALWAYS))
-    assert solution["global_inverted"] is True
+    # Create options dict with invert="always"
+    options = DEFAULT_TEST_OPTIONS.copy()
+    options['invert'] = 'always'
+    solution = propose_solution(include, list(exclude), **options)
+    assert solution.global_inverted is True
 
 
 def test_evaluate_expr_roundtrip() -> None:
     include = ["alpha/mem", "alpha/io"]
-    atoms = {"P1": "*alpha*"}
-    metrics = evaluate_expr("P1", atoms, include, [])
+    patterns = {"P1": "*alpha*"}
+    metrics = evaluate_expr("P1", patterns, include, [])
     assert metrics == {"covered": 2, "total_positive": 2, "fp": 0, "fn": 0}
 
 

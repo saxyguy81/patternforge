@@ -9,7 +9,7 @@ def sample_solution() -> dict:
         "raw_expr": "*alpha*",
         "global_inverted": False,
         "metrics": {"covered": 2, "total_positive": 2, "fp": 1, "fn": 0},
-        "atoms": [
+        "patterns": [
             {
                 "id": "P1",
                 "text": "*alpha*",
@@ -32,7 +32,7 @@ def test_explain_dict() -> None:
     sol = sample_solution()
     payload = explain_dict(sol, ["alpha/module1", "alpha/module2"], ["beta/module1"])
     assert payload["metrics"]["covered"] == 2
-    assert payload["atoms"][0]["tp"] == 2
+    assert payload["patterns"][0]["tp"] == 2
 
 
 def test_explain_text() -> None:

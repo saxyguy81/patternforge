@@ -42,7 +42,7 @@ def test_read_csv_composite_columns(tmp_path: Path) -> None:
 
 def test_load_and_save_solution(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "solution.json"
-    payload = {"expr": "P1", "atoms": []}
+    payload = {"expr": "P1", "patterns": []}
     io.save_solution(payload, str(path))
     loaded = io.load_solution(str(path))
     assert loaded == payload

@@ -1,7 +1,6 @@
 """Tests for structured per-field solver."""
 from __future__ import annotations
 
-from patternforge.engine.models import QualityMode, SolveOptions
 from patternforge.engine.solver import propose_solution_structured
 from patternforge.engine.tokens import make_split_tokenizer, iter_structured_tokens_with_fields
 from patternforge.engine.candidates import generate_candidates
@@ -31,14 +30,14 @@ def test_propose_solution_structured_per_field_atoms() -> None:
     sol = propose_solution_structured(
         include_rows,
         exclude_rows,
-        options=SolveOptions(mode=QualityMode.APPROX),
         token_iter=token_iter,
+        mode="APPROX",
     )
-    assert sol["atoms"]
-    # Ensure atoms carry field information
-    assert any("field" in a and a["field"] for a in sol["atoms"])
+    assert sol.patterns
+    # Ensure patterns carry field information
+    assert any(hasattr(a, 'field') and a.field for a in sol.patterns)
     # Should cover all include rows
-    assert sol["metrics"]["covered"] == len(include_rows)
+    assert sol.metrics["covered"] == len(include_rows)
 
 
 def test_structured_minus_term_fields() -> None:
@@ -57,18 +56,21 @@ def test_structured_minus_term_fields() -> None:
     exclude = [canon(r) for r in exclude_rows]
 
     from patternforge.engine.tokens import make_split_tokenizer, iter_structured_tokens_with_fields
-    from patternforge.engine.models import SolveOptions, QualityMode
     from patternforge.engine.solver import propose_solution_structured
 
     tk = make_split_tokenizer("classchange", min_token_len=3)
     fts = {"module": tk, "instance": tk, "pin": tk}
     tok_iter = list(iter_structured_tokens_with_fields(include_rows, fts, field_order=["module", "instance", "pin"]))
-    sol = propose_solution_structured(include_rows, exclude_rows, options=SolveOptions(mode=QualityMode.EXACT, allow_complex_expressions=True), token_iter=tok_iter)
+    sol = propose_solution_structured(include_rows, exclude_rows,
+        token_iter=tok_iter,
+        mode="EXACT",
+        allow_complex_expressions=True
+    )
     # Either a minus expression exists or the positive expression(s) suffice; when minus exists, it should reduce FP and carry not_fields
-    minus_expressions = [t for t in sol.get("expressions", []) if "-" in t.get("expr", "") or "-" in t.get("raw_expr", "")]
+    minus_expressions = [t for t in sol.expressions if "-" in t.get("expr", "") or "-" in t.get("raw_expr", "")]
     for t in minus_expressions:
         assert t.get("fp", 0) == 0
-        # not_fields may be present for structured atom pairing
+        # not_fields may be present for structured pattern pairing
         nf = t.get("not_fields", {})
         if nf:
             assert isinstance(nf, dict)

@@ -8,7 +8,7 @@ def test_explain_by_field_groups_atoms() -> None:
     solution = {
         "expr": "P1 | P2",
         "raw_expr": "*fabric* | *bank*",
-        "atoms": [
+        "patterns": [
             {"id": "P1", "text": "*fabric*", "kind": "substring", "wildcards": 2, "length": 6},
             {"id": "P2", "text": "*bank*", "kind": "substring", "wildcards": 2, "length": 4},
         ],

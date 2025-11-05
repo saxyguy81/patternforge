@@ -32,6 +32,7 @@ def generate_candidates(
     max_multi_segments: int,
     token_iter: Iterable[tuple] | None = None,
     w_field: dict[str, float] | None = None,
+    allowed_patterns: list[str] | set[str] | dict[str, list[str] | set[str]] | None = None,
 ) -> list[tuple[str, str, float, str | None]]:
     pool = CandidatePool()
     token_lists: dict[int, list[str]] = defaultdict(list)
@@ -46,6 +47,20 @@ def generate_candidates(
         key = (idx, field)
         token_lists[key].append(token.value)
 
+    # Helper to check if a pattern kind is allowed for a given field
+    def is_allowed(kind: str, field: str | None) -> bool:
+        if allowed_patterns is None:
+            return True
+        if isinstance(allowed_patterns, dict):
+            # Per-field filter
+            if field and field in allowed_patterns:
+                field_patterns = allowed_patterns[field]
+                return kind in field_patterns
+            # If field not in dict, allow all (default behavior for unspecified fields)
+            return True
+        # Global filter (list or set)
+        return kind in allowed_patterns
+
     # Helper to apply field weight to score
     def apply_weight(score: float, field: str | None) -> float:
         if w_field and field:
@@ -56,17 +71,19 @@ def generate_candidates(
     for (idx_field, tokens) in token_lists.items():
         _, field = idx_field
         for token in tokens[:per_word_substrings]:
-            pattern = f"*{token}*"
-            score = len(token)
-            pool.push(pattern, "substring", apply_weight(float(score), field), field)
+            if is_allowed("substring", field):
+                pattern = f"*{token}*"
+                score = len(token)
+                pool.push(pattern, "substring", apply_weight(float(score), field), field)
         joined = "/".join(tokens)
-        if joined:
+        if joined and is_allowed("exact", field):
             pool.push(joined, "exact", apply_weight(float(len(joined)), field), field)
         for token in tokens:
-            pool.push(token, "exact", apply_weight(float(len(token)), field), field)
+            if is_allowed("exact", field):
+                pool.push(token, "exact", apply_weight(float(len(token)), field), field)
 
         # Generate prefix patterns: token/* (anchored start)
-        if len(tokens) >= 1 and tokens[0]:
+        if len(tokens) >= 1 and tokens[0] and is_allowed("prefix", field):
             first_token = tokens[0]
             pattern = f"{first_token}/*"
             # Score higher than substring to prefer anchored patterns
@@ -75,14 +92,14 @@ def generate_candidates(
             pool.push(pattern, "prefix", apply_weight(float(score), field), field)
 
         # Generate suffix patterns: */token (anchored end)
-        if len(tokens) >= 1 and tokens[-1]:
+        if len(tokens) >= 1 and tokens[-1] and is_allowed("suffix", field):
             last_token = tokens[-1]
             pattern = f"*/{last_token}"
             # Score higher than substring to prefer anchored patterns
             score = len(last_token) * 1.5
             pool.push(pattern, "suffix", apply_weight(float(score), field), field)
 
-        if len(tokens) >= 2:
+        if len(tokens) >= 2 and is_allowed("multi", field):
             for start in range(len(tokens)):
                 for end in range(start + 1, min(len(tokens), start + max_multi_segments) + 1):
                     segment = tokens[start:end]

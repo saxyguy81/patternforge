@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 
 from patternforge.engine.candidates import generate_candidates
-from patternforge.engine.models import QualityMode, SolveOptions
 from patternforge.engine.solver import propose_solution
 from patternforge.engine.tokens import (
     Token,
@@ -90,10 +89,9 @@ def test_propose_solution_with_structured_tokenizer_finds_bank() -> None:
         iter_structured_tokens(include_rows, field_tokenizers, field_order=["module", "instance", "pin"])  # noqa: E501
     )
 
-    options = SolveOptions(mode=QualityMode.APPROX)
-    solution = propose_solution(include, exclude, options, token_iter=token_iter)
-    assert solution["atoms"]
-    metrics = solution["metrics"]
+    solution = propose_solution(include, exclude, token_iter, mode="APPROX")
+    assert solution.patterns
+    metrics = solution.metrics
     assert metrics["covered"] == len(include)
     assert metrics["fp"] == 0
 
@@ -108,8 +106,7 @@ def test_propose_solution_custom_iter_overrides_min_token_len() -> None:
         return [Token(p, i) for i, p in enumerate(parts)]
 
     token_iter = list(iter_custom_tokens(include, my_tok))
-    options = SolveOptions(mode=QualityMode.APPROX, min_token_len=100)
-    solution = propose_solution(include, exclude, options, token_iter=token_iter)
-    assert solution["atoms"]
-    texts = [a["text"] for a in solution["atoms"]]
+    solution = propose_solution(include, exclude, token_iter, mode="APPROX", min_token_len=100)
+    assert solution.patterns
+    texts = [a.text for a in solution.patterns]
     assert any("abc" in t or "xyz" in t for t in texts)

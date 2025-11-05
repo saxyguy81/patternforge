@@ -8,7 +8,7 @@ from . import matcher
 from . import bitset
 from .candidates import generate_candidates
 from .tokens import Token
-from .models import Atom, Candidate, InvertStrategy, Solution, SolveOptions
+from .models import Pattern, Candidate, InvertStrategy, Solution, SolveOptions
 
 
 @dataclass
@@ -32,7 +32,7 @@ class _Context:
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "w_fp": 1.0,
     "w_fn": 1.0,
-    "w_atom": 0.05,
+    "w_pattern": 0.05,
     "w_op": 0.02,
     "w_wc": 0.01,
     "w_len": 0.001,
@@ -54,7 +54,7 @@ def _resolve_weights(options: SolveOptions, field: str | None = None) -> dict[st
     weights = dict(_DEFAULT_WEIGHTS)
     weights["w_fp"] = get_weight_value(options.weights.w_fp, field)
     weights["w_fn"] = get_weight_value(options.weights.w_fn, field)
-    weights["w_atom"] = get_weight_value(options.weights.w_atom, field)
+    weights["w_pattern"] = get_weight_value(options.weights.w_pattern, field)
     weights["w_op"] = get_weight_value(options.weights.w_op, field)
     weights["w_wc"] = get_weight_value(options.weights.w_wc, field)
     weights["w_len"] = get_weight_value(options.weights.w_len, field)
@@ -65,14 +65,14 @@ def _cost(selection: _Selection, include_size: int, weights: dict[str, float]) -
     matched = bitset.count_bits(selection.include_bits)
     fp = bitset.count_bits(selection.exclude_bits)
     fn = include_size - matched
-    atoms = len(selection.chosen)
+    patterns = len(selection.chosen)
     wildcards = sum(c.wildcards for c in selection.chosen)
     length = sum(c.length for c in selection.chosen)
-    ops = max(0, atoms - 1)
+    ops = max(0, patterns - 1)
     return (
         weights["w_fp"] * fp
         + weights["w_fn"] * fn
-        + weights["w_atom"] * atoms
+        + weights["w_pattern"] * patterns
         + weights["w_op"] * ops
         + weights["w_wc"] * wildcards
         + weights["w_len"] * length
@@ -88,6 +88,7 @@ def _build_candidates(ctx: _Context) -> list[Candidate]:
         max_multi_segments=ctx.options.max_multi_segments,
         token_iter=ctx.token_iter,
         w_field=ctx.options.weights.w_field,
+        allowed_patterns=ctx.options.allowed_patterns,
     )
     candidates: list[Candidate] = []
     limit = ctx.options.budgets.max_candidates
@@ -135,7 +136,7 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
     # Convert percentage budgets to absolute limits
     max_fp = resolve_budget_limit(ctx.options.budgets.max_fp, len(ctx.include))
     max_fn = resolve_budget_limit(ctx.options.budgets.max_fn, len(ctx.include))
-    max_atoms = resolve_budget_limit(ctx.options.budgets.max_atoms, len(ctx.include))
+    max_patterns = resolve_budget_limit(ctx.options.budgets.max_patterns, len(ctx.include))
 
     changed = True
     while changed:
@@ -182,8 +183,8 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
                 best_candidate_cost = trial_cost
                 best_candidate = candidate
         within_limit = (
-            max_atoms is None
-            or len(selection.chosen) < max_atoms
+            max_patterns is None
+            or len(selection.chosen) < max_patterns
         )
         if best_candidate is not None and within_limit:
             new_include_bits = selection.include_bits | best_candidate.include_bits
@@ -201,11 +202,11 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
     return selection
 
 
-def _atoms_from_selection(selection: _Selection) -> list[Atom]:
-    atoms: list[Atom] = []
+def _patterns_from_selection(selection: _Selection) -> list[Pattern]:
+    patterns: list[Pattern] = []
     for idx, candidate in enumerate(selection.chosen, start=1):
-        atoms.append(
-            Atom(
+        patterns.append(
+            Pattern(
                 id=f"P{idx}",
                 text=candidate.text,
                 kind=candidate.kind,
@@ -214,11 +215,11 @@ def _atoms_from_selection(selection: _Selection) -> list[Atom]:
                 field=candidate.field,
             )
         )
-    return atoms
+    return patterns
 
 
-def _evaluate_atoms(
-    atoms: list[Atom], include: Sequence[str], exclude: Sequence[str]
+def _evaluate_patterns(
+    patterns: list[Pattern], include: Sequence[str], exclude: Sequence[str]
 ) -> tuple[int, int, int, dict[str, dict[str, int]]]:
     def _matches(text: str, pattern: str) -> bool:
         # Support simple conjunction '&' and difference '-' (A - B) operators in raw patterns
@@ -242,26 +243,26 @@ def _evaluate_atoms(
         return all(_match_piece(p) for p in parts)
     include_mask = 0
     exclude_mask = 0
-    per_atom: dict[str, dict[str, int]] = {}
-    for atom in atoms:
+    per_pattern: dict[str, dict[str, int]] = {}
+    for pattern in patterns:
         mask_in = 0
         mask_ex = 0
         for idx, text in enumerate(include):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_in |= 1 << idx
         for idx, text in enumerate(exclude):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_ex |= 1 << idx
         include_mask |= mask_in
         exclude_mask |= mask_ex
-        per_atom[atom.id] = {
+        per_pattern[pattern.id] = {
             "tp": bitset.count_bits(mask_in),
             "fp": bitset.count_bits(mask_ex),
         }
     matched = bitset.count_bits(include_mask)
     fp = bitset.count_bits(exclude_mask)
     fn = len(include) - matched
-    return matched, fp, fn, per_atom
+    return matched, fp, fn, per_pattern
 
 
 def _make_solution(
@@ -271,19 +272,19 @@ def _make_solution(
     options: SolveOptions,
     inverted: bool,
 ) -> Solution:
-    base_atoms = _atoms_from_selection(selection)
-    matched_expr, fp_expr, fn_expr, per_atom = _evaluate_atoms(base_atoms, include, exclude)
-    atoms: list[Atom] = []
-    for atom in base_atoms:
-        stats = per_atom.get(atom.id, {"tp": 0, "fp": 0})
-        atoms.append(
-            Atom(
-                id=atom.id,
-                text=atom.text,
-                kind=atom.kind,
-                wildcards=atom.wildcards,
-                length=atom.length,
-                negated=atom.negated,
+    base_patterns = _patterns_from_selection(selection)
+    matched_expr, fp_expr, fn_expr, per_pattern = _evaluate_patterns(base_patterns, include, exclude)
+    patterns: list[Pattern] = []
+    for pattern in base_patterns:
+        stats = per_pattern.get(pattern.id, {"tp": 0, "fp": 0})
+        patterns.append(
+            Pattern(
+                id=pattern.id,
+                text=pattern.text,
+                kind=pattern.kind,
+                wildcards=pattern.wildcards,
+                length=pattern.length,
+                negated=pattern.negated,
                 tp=stats["tp"],
                 fp=stats["fp"],
             )
@@ -296,8 +297,8 @@ def _make_solution(
         matched = matched_expr
         fp = fp_expr
         fn = fn_expr
-    expr = " | ".join(atom.id for atom in atoms) if atoms else "FALSE"
-    raw_expr = " | ".join(atom.text for atom in atoms) if atoms else "FALSE"
+    expr = " | ".join(pattern.id for pattern in patterns) if patterns else "FALSE"
+    raw_expr = " | ".join(pattern.text for pattern in patterns) if patterns else "FALSE"
     def _matches(text: str, pattern: str) -> bool:
         def _match_piece(piece: str) -> bool:
             piece = piece.strip()
@@ -321,12 +322,12 @@ def _make_solution(
     dataset_neg = exclude
     mask_pos = 0
     mask_neg = 0
-    for atom in atoms:
+    for pattern in patterns:
         for idx, text in enumerate(dataset_pos):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_pos |= 1 << idx
         for idx, text in enumerate(dataset_neg):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_neg |= 1 << idx
     for idx, text in enumerate(dataset_pos):
         covered = bool(mask_pos & (1 << idx))
@@ -351,31 +352,31 @@ def _make_solution(
         "total_positive": len(include),
         "fp": fp,
         "fn": fn,
-        "atoms": len(atoms),
-        "boolean_ops": max(0, len(atoms) - 1),
-        "wildcards": sum(atom.wildcards for atom in atoms),
-        "pattern_chars": sum(atom.length for atom in atoms),
+        "patterns": len(patterns),
+        "boolean_ops": max(0, len(patterns) - 1),
+        "wildcards": sum(pattern.wildcards for pattern in patterns),
+        "pattern_chars": sum(pattern.length for pattern in patterns),
     }
-    # Build top-level terms (OR of atoms, possibly conjunctions when enabled)
+    # Build top-level terms (OR of patterns, possibly conjunctions when enabled)
     terms: list[dict[str, object]] = []
-    # Precompute per-atom masks to enable residual stats and potential conjunctions
+    # Precompute per-pattern masks to enable residual stats and potential conjunctions
     masks_in: list[int] = []
     masks_ex: list[int] = []
-    for atom in atoms:
+    for pattern in patterns:
         mask_in = 0
         mask_ex = 0
         for idx, text in enumerate(include):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_in |= 1 << idx
         for idx, text in enumerate(exclude):
-            if _matches(text, atom.text):
+            if _matches(text, pattern.text):
                 mask_ex |= 1 << idx
         masks_in.append(mask_in)
         masks_ex.append(mask_ex)
-    # When allowed, try to pair atoms into conjunction terms that retain TP and reduce FP
-    used = [False] * len(atoms)
+    # When allowed, try to pair patterns into conjunction terms that retain TP and reduce FP
+    used = [False] * len(patterns)
     if options.allow_complex_expressions:
-        for i, atom in enumerate(atoms):
+        for i, pattern in enumerate(patterns):
             if used[i]:
                 continue
             in_i = masks_in[i]
@@ -384,7 +385,7 @@ def _make_solution(
             best_fp = bitset.count_bits(ex_i)
             best_neg = -1
             best_neg_fp = bitset.count_bits(ex_i)
-            for j in range(i + 1, len(atoms)):
+            for j in range(i + 1, len(patterns)):
                 if used[j]:
                     continue
                 in_j = masks_in[j]
@@ -407,8 +408,8 @@ def _make_solution(
                     best_neg_ex = diff_ex
             if best != -1:
                 used[i] = used[best] = True
-                a = atoms[i]
-                b = atoms[best]
+                a = patterns[i]
+                b = patterns[best]
                 terms.append(
                     {
                         "expr": f"{a.id} & {b.id}",
@@ -427,8 +428,8 @@ def _make_solution(
                 )
             elif best_neg != -1:
                 used[i] = used[best_neg] = True
-                a = atoms[i]
-                b = atoms[best_neg]
+                a = patterns[i]
+                b = patterns[best_neg]
                 # Build fields maps for positive and negative if possible
                 fields_map = ( {a.field: a.text} if a.field else {} )
                 not_fields = ( {b.field: b.text} if b.field else {} )
@@ -456,14 +457,14 @@ def _make_solution(
                 ex_m = masks_ex[i]
                 terms.append(
                     {
-                        "expr": atom.id,
-                        "raw_expr": atom.text,
-                        "field": atom.field,
-                        "fields": ({atom.field: atom.text} if atom.field else {}),
+                        "expr": pattern.id,
+                        "raw_expr": pattern.text,
+                        "field": pattern.field,
+                        "fields": ({pattern.field: pattern.text} if pattern.field else {}),
                         "tp": bitset.count_bits(in_m),
                         "fp": bitset.count_bits(ex_m),
                         "fn": len(include) - bitset.count_bits(in_m),
-                        "length": atom.length,
+                        "length": pattern.length,
                         "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
                         "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
                         "_mask_in": in_m,
@@ -471,19 +472,19 @@ def _make_solution(
                     }
                 )
     else:
-        for i, atom in enumerate(atoms):
+        for i, pattern in enumerate(patterns):
             in_m = masks_in[i]
             ex_m = masks_ex[i]
             terms.append(
                 {
-                    "expr": atom.id,
-                    "raw_expr": atom.text,
-                    "field": atom.field,
-                    "fields": ({atom.field: atom.text} if atom.field else {}),
+                    "expr": pattern.id,
+                    "raw_expr": pattern.text,
+                    "field": pattern.field,
+                    "fields": ({pattern.field: pattern.text} if pattern.field else {}),
                     "tp": bitset.count_bits(in_m),
                     "fp": bitset.count_bits(ex_m),
                     "fn": len(include) - bitset.count_bits(in_m),
-                    "length": atom.length,
+                    "length": pattern.length,
                     "include_examples": [include[k] for k in range(len(include)) if (in_m >> k) & 1][:3],
                     "exclude_examples": [exclude[k] for k in range(len(exclude)) if (ex_m >> k) & 1][:3],
                     "_mask_in": in_m,
@@ -492,7 +493,7 @@ def _make_solution(
             )
         # end base-expression assembly
 
-    # Residual coverage based on greedy order of atoms
+    # Residual coverage based on greedy order of patterns
     acc_in = 0
     acc_ex = 0
     for expression in terms:
@@ -591,20 +592,24 @@ def _make_solution(
                     break
 
     # Promote terms' field maps into final expression (OR of per-expression conjunctions)
-    def term_to_text(expression: dict[str, object]) -> str:
+    def term_to_text(expression: dict[str, object], use_symbolic: bool = False) -> str:
         fields = expression.get("fields") or {}
         if isinstance(fields, dict) and fields:
             parts = []
             for _, pat in fields.items():
                 parts.append(f"({pat})")
             return " & ".join(parts)
-        # fallback to raw_expr
-        return str(expression.get("raw_expr", "FALSE"))
-    expr_text = " | ".join(term_to_text(t) for t in terms) if terms else "FALSE"
+        # fallback to expr (symbolic) or raw_expr (actual pattern)
+        key = "expr" if use_symbolic else "raw_expr"
+        return str(expression.get(key, "FALSE"))
+
+    # Generate both symbolic and raw expressions
+    symbolic_expr = " | ".join(term_to_text(t, use_symbolic=True) for t in terms) if terms else "FALSE"
+    raw_expr = " | ".join(term_to_text(t, use_symbolic=False) for t in terms) if terms else "FALSE"
 
     return Solution(
-        expr=expr_text,
-        raw_expr=expr_text,
+        expr=symbolic_expr,
+        raw_expr=raw_expr,
         global_inverted=inverted,
         term_method=("subtractive" if inverted else "additive"),
         mode=options.mode.value,
@@ -613,19 +618,145 @@ def _make_solution(
             "splitmethod": options.splitmethod,
             "min_token_len": options.min_token_len,
         },
-        atoms=atoms,
+        patterns=patterns,
         metrics=metrics,
         witnesses=witnesses,
         expressions=terms,
     )
 
 
+def _build_solve_options_from_kwargs(**kwargs) -> SolveOptions:
+    """Build SolveOptions from flattened kwargs.
+
+    This allows users to pass budget/weight parameters directly instead of
+    nesting OptimizeBudgets and OptimizeWeights objects.
+
+    Examples:
+        # Instead of:
+        SolveOptions(budgets=OptimizeBudgets(max_patterns=5), weights=OptimizeWeights(w_fp=2.0))
+
+        # You can pass:
+        _build_solve_options_from_kwargs(max_patterns=5, w_fp=2.0)
+    """
+    from .models import OptimizeBudgets, OptimizeWeights, QualityMode
+
+    # Parameters for OptimizeBudgets (hard constraints)
+    budget_keys = {'max_candidates', 'max_patterns', 'max_fp', 'max_fn'}
+    budgets_params = {k: v for k, v in kwargs.items() if k in budget_keys}
+
+    # Parameters for OptimizeWeights
+    weight_keys = {'w_fp', 'w_fn', 'w_pattern', 'w_op', 'w_wc', 'w_len', 'w_field'}
+    weights_params = {k: v for k, v in kwargs.items() if k in weight_keys}
+
+    # Parameters for SolveOptions itself
+    options_keys = {'mode', 'effort', 'invert', 'allowed_patterns', 'min_token_len',
+                    'splitmethod', 'per_word_substrings', 'max_multi_segments',
+                    'allow_complex_expressions'}
+    options_params = {k: v for k, v in kwargs.items() if k in options_keys}
+
+    # Convert string mode to QualityMode enum
+    if 'mode' in options_params and isinstance(options_params['mode'], str):
+        mode_str = options_params['mode'].upper()
+        if mode_str == 'EXACT':
+            options_params['mode'] = QualityMode.EXACT
+        elif mode_str == 'APPROX':
+            options_params['mode'] = QualityMode.APPROX
+        else:
+            raise ValueError(f"Invalid mode: {options_params['mode']}. Must be 'EXACT' or 'APPROX'")
+
+    # Build nested objects
+    if budgets_params:
+        options_params['budgets'] = OptimizeBudgets(**budgets_params)
+    if weights_params:
+        options_params['weights'] = OptimizeWeights(**weights_params)
+
+    return SolveOptions(**options_params)
+
+
 def propose_solution(
     include: Sequence[str],
     exclude: Sequence[str],
-    options: SolveOptions,
     token_iter: list[tuple[int, Token]] | None = None,
-) -> dict[str, object]:
+    **kwargs
+) -> Solution:
+    """Generate patterns that match include but not exclude.
+
+    Args:
+        include: Paths to match (e.g., ["alpha/module1/mem", "beta/cache"])
+        exclude: Paths to avoid (e.g., ["gamma/debug", "alpha/router"])
+        token_iter: [Advanced] Pre-generated token iterator for custom tokenization
+
+        **kwargs: Configuration parameters:
+
+            Quality & Mode:
+            - mode: "EXACT" (zero false positives) or "APPROX" (faster, may allow FP)
+            - effort: "low", "medium" (default), "high", or "exhaustive"
+            - invert: "auto" (default), "never", or "always"
+
+            Budget Constraints:
+            - max_candidates: Max candidate patterns to consider (default: 4000)
+            - max_patterns: Max patterns in solution (int or 0<float<1 for percentage)
+            - max_multi_segments: Max segments in patterns like *a*b*c* (default: 3)
+            - max_fp: Max false positives allowed (int or 0<float<1 for %)
+            - max_fn: Max false negatives allowed (int or 0<float<1 for %)
+
+            Weights (higher = penalize more):
+            - w_fp: False positive weight (default: 1.0)
+            - w_fn: False negative weight (default: 1.0)
+            - w_pattern: Pattern count weight (default: 0.05)
+            - w_op: Boolean operator weight (default: 0.02)
+            - w_wc: Wildcard count weight (default: 0.01)
+            - w_len: Pattern length weight (default: 0.001)
+            - w_field: Per-field weights dict (for structured data)
+
+            Pattern Generation:
+            - allowed_patterns: Restrict to pattern types, e.g., ["prefix", "suffix"]
+            - min_token_len: Min token length to consider (default: 3)
+            - splitmethod: "classchange" (default) or "char"
+            - per_word_substrings: Top N substrings per token (default: 5)
+            - allow_complex_terms: Allow conjunctive terms (default: False)
+            - allow_complex_expressions: Allow complex boolean expressions (default: False)
+
+    Returns:
+        Solution: Object with attributes:
+            - expr: Symbolic expression (e.g., "P1 | P2")
+            - raw_expr: Raw pattern expression (e.g., "alpha/* | *bank*")
+            - patterns: List of Pattern objects
+            - metrics: Dict with 'covered', 'total_positive', 'fp' (false positives),
+                      'fn' (false negatives)
+            - witnesses: Example matches/mismatches
+
+    Glossary:
+        - FP (False Positive): Item in exclude that matches the pattern (bad)
+        - FN (False Negative): Item in include that doesn't match (bad)
+        - TP (True Positive): Item in include that matches (good)
+        - Coverage: Fraction of include items matched (TP / total_positive)
+
+    Examples:
+        # Simple usage with defaults
+        solution = propose_solution(include, exclude)
+        print(f"Matched {solution.metrics['covered']}/{solution.metrics['total_positive']}")
+        print(f"False positives: {solution.metrics['fp']}")
+
+        # Require exact matching (zero false positives)
+        solution = propose_solution(include, exclude, mode="EXACT")
+
+        # Limit solution size and penalize false positives heavily
+        solution = propose_solution(include, exclude,
+            max_patterns=5,
+            max_fp=0,
+            w_fp=2.0
+        )
+
+        # High-effort search with pattern restrictions
+        solution = propose_solution(include, exclude,
+            mode="EXACT",
+            effort="high",
+            allowed_patterns=["prefix", "suffix"]
+        )
+    """
+    # Build options from kwargs
+    options = _build_solve_options_from_kwargs(**kwargs) if kwargs else SolveOptions()
     # In EXACT mode, automatically enforce max_fp=0 if not already set
     from .models import QualityMode, OptimizeBudgets
     if options.mode == QualityMode.EXACT and options.budgets.max_fp is None:
@@ -636,11 +767,12 @@ def propose_solution(
             min_token_len=options.min_token_len,
             per_word_substrings=options.per_word_substrings,
             max_multi_segments=options.max_multi_segments,
+            allowed_patterns=options.allowed_patterns,
             invert=options.invert,
             weights=options.weights,
             budgets=OptimizeBudgets(
                 max_candidates=options.budgets.max_candidates,
-                max_atoms=options.budgets.max_atoms,
+                max_patterns=options.budgets.max_patterns,
                 max_fp=0,  # Enforce zero false positives in EXACT mode
                 max_fn=options.budgets.max_fn,
             ),
@@ -651,10 +783,10 @@ def propose_solution(
     selection = _greedy_select(ctx, candidates)
     base_solution = _make_solution(include, exclude, selection, options, inverted=False)
     if options.invert == InvertStrategy.NEVER:
-        return base_solution.to_json()
-    if options.invert == InvertStrategy.ALWAYS or not base_solution.atoms:
+        return base_solution
+    if options.invert == InvertStrategy.ALWAYS or not base_solution.patterns:
         inverted_solution = _make_solution(include, exclude, selection, options, inverted=True)
-        return inverted_solution.to_json()
+        return inverted_solution
     inverted_solution = _make_solution(include, exclude, selection, options, inverted=True)
     weights = _resolve_weights(options)
     base_cost = _cost(selection, len(include), weights)
@@ -667,8 +799,8 @@ def propose_solution(
     )
     inverted_cost = _cost(inverted_selection, len(include), weights)
     if options.invert == InvertStrategy.ALWAYS or inverted_cost < base_cost:
-        return inverted_solution.to_json()
-    return base_solution.to_json()
+        return inverted_solution
+    return base_solution
 
 
 def _default_field_getter(row: object, field: str) -> str:
@@ -687,9 +819,9 @@ def propose_solution_structured(
     include_rows: Sequence[object],
     exclude_rows: Sequence[object] | None = None,
     fields: list[str] | None = None,
-    options: SolveOptions | None = None,
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
+    **kwargs
 ) -> dict[str, object]:
     """
     Generate patterns for structured data with multiple fields.
@@ -706,17 +838,18 @@ def propose_solution_structured(
 
         fields: Field names (auto-detected from dict keys or DataFrame columns)
 
-        options: SolveOptions with all configuration
-            - Use OptimizeWeights.w_field for field preferences
-            - Use splitmethod/min_token_len (scalar or dict) for per-field tokenization
-            - Use effort for algorithm selection
-
         token_iter: [Advanced] Pre-generated token iterator (auto-generated if None)
 
         field_getter: [Advanced] Custom field getter function(row, field) -> str
 
+        **kwargs: Configuration parameters (same as propose_solution):
+            - mode, effort, invert
+            - max_candidates, max_patterns, max_fp, max_fn
+            - w_fp, w_fn, w_pattern, w_field, etc.
+            - See propose_solution() docstring for complete list
+
     Returns:
-        Solution dict with per-field patterns in 'atoms', each with 'field' attribute
+        Solution dict with per-field patterns in 'patterns', each with 'field' attribute
 
     Examples:
         >>> # Simple usage with auto-detection
@@ -780,9 +913,8 @@ def propose_solution_structured(
         else:
             raise ValueError("fields must be specified for non-dict rows")
 
-    # Create default options if not provided
-    if options is None:
-        options = SolveOptions()
+    # Create options from kwargs
+    options = _build_solve_options_from_kwargs(**kwargs) if kwargs else SolveOptions()
 
     # Extract per-field configuration with utils
     from .utils import get_field_value
@@ -852,7 +984,7 @@ def _propose_solution_structured_scalable(
         generate_field_patterns_scalable,
         greedy_set_cover_structured,
     )
-    from .models import Atom, Solution
+    from .models import Pattern, Solution
     from . import bitset
     from .utils import resolve_budget_limit
 
@@ -879,7 +1011,7 @@ def _propose_solution_structured_scalable(
     )
 
     # Build solution
-    atoms = []
+    patterns = []
     expressions_output = []
 
     for expr_idx, expr_dict in enumerate(selected_expressions, 1):
@@ -893,9 +1025,9 @@ def _propose_solution_structured_scalable(
             "fn": len(include_rows) - bitset.count_bits(expr_dict["include_mask"]),
         })
 
-        # Create atoms
+        # Create patterns
         for field_name, pattern in fields_dict.items():
-            atoms.append(Atom(
+            patterns.append(Pattern(
                 id=f"E{expr_idx}_{field_name}",
                 text=pattern,
                 kind="structured",
@@ -916,11 +1048,11 @@ def _propose_solution_structured_scalable(
         "total_positive": len(include_rows),
         "fp": bitset.count_bits(fp_mask),
         "fn": len(include_rows) - bitset.count_bits(covered_mask),
-        "atoms": len(atoms),
+        "patterns": len(patterns),
         "expressions": len(expressions_output),
         "boolean_ops": max(0, len(expressions_output) - 1),
-        "wildcards": sum(a.wildcards for a in atoms),
-        "pattern_chars": sum(a.length for a in atoms),
+        "wildcards": sum(a.wildcards for a in patterns),
+        "pattern_chars": sum(a.length for a in patterns),
     }
 
     # Build expression string
@@ -959,11 +1091,11 @@ def _propose_solution_structured_scalable(
             "splitmethod": options.splitmethod,
             "algorithm": "scalable",
         },
-        atoms=atoms,
+        patterns=patterns,
         metrics=metrics,
         witnesses=witnesses,
         expressions=expressions_output,
-    ).to_json()
+    )
 
 
 def _propose_solution_structured_bounded(
@@ -1063,11 +1195,11 @@ def _propose_solution_structured_bounded(
     )
 
     # Build solution from selected terms
-    from .models import Atom, Solution
+    from .models import Pattern, Solution
     from . import bitset
 
     # Convert terms to solution format
-    atoms = []
+    patterns = []
     expressions_output = []
 
     for expression_idx, expression in enumerate(selected_expressions, 1):
@@ -1082,11 +1214,11 @@ def _propose_solution_structured_bounded(
         }
         expressions_output.append(term_dict)
 
-        # Create atoms for each field pattern in expression
+        # Create patterns for each field pattern in expression
         for field_name, pattern in expression.fields.items():
             if pattern == "*":
                 continue  # Skip wildcard fields
-            atom = Atom(
+            pattern = Pattern(
                 id=f"T{expression_idx}_{field_name}",
                 text=pattern,
                 kind="structured",
@@ -1094,7 +1226,7 @@ def _propose_solution_structured_bounded(
                 length=len(pattern),
                 field=field_name,
             )
-            atoms.append(atom)
+            patterns.append(pattern)
 
     # Compute final metrics
     covered_mask = 0
@@ -1108,11 +1240,11 @@ def _propose_solution_structured_bounded(
         "total_positive": len(include_rows),
         "fp": bitset.count_bits(fp_mask),
         "fn": len(include_rows) - bitset.count_bits(covered_mask),
-        "atoms": len(atoms),
+        "patterns": len(patterns),
         "terms": len(expressions_output),
         "boolean_ops": max(0, len(expressions_output) - 1),  # Number of OR operations
-        "wildcards": sum(a.wildcards for a in atoms),
-        "pattern_chars": sum(a.length for a in atoms),
+        "wildcards": sum(a.wildcards for a in patterns),
+        "pattern_chars": sum(a.length for a in patterns),
     }
 
     # Build expression
@@ -1151,11 +1283,11 @@ def _propose_solution_structured_bounded(
             "splitmethod": options.splitmethod,
             "min_token_len": options.min_token_len,
         },
-        atoms=atoms,
+        patterns=patterns,
         metrics=metrics,
         witnesses=witnesses,
         expressions=expressions_output,
-    ).to_json()
+    )
 
 
 def _eval_atom(pattern: str, dataset: Sequence[str]) -> int:
@@ -1233,12 +1365,12 @@ class _ExprParser:
                 raise ValueError("missing closing parenthesis")
             self.pos += 1
             return node
-        return ["atom", self._parse_atom()]
+        return ["pattern", self._parse_atom()]
 
     def _parse_atom(self) -> str:
         self._skip_spaces()
         if self._peek() != "P":
-            raise ValueError("expected atom identifier")
+            raise ValueError("expected pattern identifier")
         start = self.pos
         self.pos += 1
         while self.pos < len(self.expr) and self.expr[self.pos].isdigit():
@@ -1253,10 +1385,10 @@ class _ExprParser:
 
 def _eval_ast(node: list, masks: dict[str, int], universe: int) -> int:
     op = node[0]
-    if op == "atom":
+    if op == "pattern":
         name = node[1]
         if name not in masks:
-            raise KeyError(f"missing atom {name}")
+            raise KeyError(f"missing pattern {name}")
         return masks[name]
     if op == "!":
         return universe ^ _eval_ast(node[1], masks, universe)
@@ -1269,14 +1401,14 @@ def _eval_ast(node: list, masks: dict[str, int], universe: int) -> int:
 
 def evaluate_expr(
     expr: str,
-    atoms: dict[str, str],
+    patterns: dict[str, str],
     include: Sequence[str],
     exclude: Sequence[str],
 ) -> dict[str, int]:
     parser = _ExprParser(expr)
     ast = parser.parse()
-    include_masks = {name: _eval_atom(pattern, include) for name, pattern in atoms.items()}
-    exclude_masks = {name: _eval_atom(pattern, exclude) for name, pattern in atoms.items()}
+    include_masks = {name: _eval_atom(pattern, include) for name, pattern in patterns.items()}
+    exclude_masks = {name: _eval_atom(pattern, exclude) for name, pattern in patterns.items()}
     include_universe = (1 << len(include)) - 1
     exclude_universe = (1 << len(exclude)) - 1 if exclude else 0
     include_mask = _eval_ast(ast, include_masks, include_universe)

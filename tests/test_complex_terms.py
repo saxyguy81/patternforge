@@ -1,21 +1,21 @@
 """Tests for complex conjunction terms when enabled."""
 from __future__ import annotations
 
-from patternforge.engine.models import InvertStrategy, OptimizeBudgets, QualityMode, SolveOptions
 from patternforge.engine.solver import propose_solution
 
 
-def _opts_complex() -> SolveOptions:
-    return SolveOptions(
-        mode=QualityMode.EXACT,
-        invert=InvertStrategy.NEVER,
-        budgets=OptimizeBudgets(max_candidates=256, max_atoms=8),
-        allow_complex_expressions=True,
-        min_token_len=3,
-        per_word_substrings=8,
-        max_multi_segments=3,
-        splitmethod="classchange",
-    )
+# Complex terms options as kwargs dict
+COMPLEX_OPTIONS = {
+    "mode": "EXACT",
+    "invert": "never",
+    "max_candidates": 256,
+    "max_patterns": 8,
+    "allow_complex_expressions": True,
+    "min_token_len": 3,
+    "per_word_substrings": 8,
+    "max_multi_segments": 3,
+    "splitmethod": "classchange",
+}
 
 
 def test_conjunction_term_present_and_reduces_fp() -> None:
@@ -28,9 +28,9 @@ def test_conjunction_term_present_and_reduces_fp() -> None:
         "debug/cache/zzz",
         "debug/bank/zzz",
     ]
-    sol = propose_solution(include, exclude, _opts_complex())
+    sol = propose_solution(include, exclude, **COMPLEX_OPTIONS)
     # Expect at least one expression containing an '&'
-    expressions = sol.get("expressions", [])
+    expressions = sol.expressions
     assert any("&" in t.get("expr", "") or "&" in t.get("raw_expr", "") for t in expressions)
     # Find that conjunction and assert it has lower fp than components would individually
     conj = next(t for t in expressions if "&" in t.get("expr", "") or "&" in t.get("raw_expr", ""))
@@ -46,8 +46,8 @@ def test_and_not_term_present_and_reduces_fp() -> None:
     exclude = [
         "dbg/cache",
     ]
-    sol = propose_solution(include, exclude, _opts_complex())
-    expressions = sol.get("expressions", [])
+    sol = propose_solution(include, exclude, **COMPLEX_OPTIONS)
+    expressions = sol.expressions
     # Expect a '-' based expression
     assert any("-" in t.get("expr", "") or "-" in t.get("raw_expr", "") for t in expressions)
     minus = next(t for t in expressions if "-" in t.get("expr", "") or "-" in t.get("raw_expr", ""))

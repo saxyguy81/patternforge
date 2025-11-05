@@ -54,7 +54,6 @@ export PYTHONPATH=/path/to/patternforge/src:$PYTHONPATH
 ### Python API - Simplest Usage
 
 ```python
-from patternforge.engine.models import SolveOptions
 from patternforge.engine.solver import propose_solution
 
 # Your data
@@ -68,13 +67,20 @@ exclude = [
     "chip/cpu/registers/file0",
 ]
 
-# Generate patterns
-solution = propose_solution(include, exclude, SolveOptions())
+# Generate patterns - defaults to EXACT mode (zero false positives)
+solution = propose_solution(include, exclude)
 
 # Inspect results
-print(f"Pattern: {solution['raw_expr']}")  # *cpu*cache*
-print(f"Coverage: {solution['metrics']['covered']}/{solution['metrics']['total_positive']}")
-print(f"False positives: {solution['metrics']['fp']}")  # 0 in EXACT mode
+print(f"Pattern: {solution.raw_expr}")  # *cpu*cache*
+print(f"Coverage: {solution.metrics['covered']}/{solution.metrics['total_positive']}")
+print(f"False positives: {solution.metrics['fp']}")  # 0 in EXACT mode
+
+# Customize with direct parameters - no classes needed!
+solution = propose_solution(include, exclude,
+    mode="EXACT",        # Zero false positives (string, not enum!)
+    max_patterns=5,      # At most 5 patterns
+    w_fp=2.0            # Penalize false positives heavily
+)
 ```
 
 **See:** `examples/01_quick_start.py` for complete runnable examples
@@ -165,7 +171,7 @@ video*           other/video/display       ✗ (not anchored at start)
 - **Speed:** Slower (explores more combinations)
 
 ```python
-SolveOptions(mode=QualityMode.EXACT)
+solution = propose_solution(include, exclude, mode="EXACT")
 ```
 
 #### APPROX Mode
@@ -175,7 +181,7 @@ SolveOptions(mode=QualityMode.EXACT)
 - **Speed:** 2-10x faster
 
 ```python
-SolveOptions(mode=QualityMode.APPROX)
+solution = propose_solution(include, exclude, mode="APPROX")
 ```
 
 **See:** `examples/01_quick_start.py` Example 3
@@ -187,7 +193,6 @@ For hierarchical paths or flat strings where you want to match entire strings.
 ### Basic Example
 
 ```python
-from patternforge.engine.models import SolveOptions
 from patternforge.engine.solver import propose_solution
 
 include = [
@@ -200,10 +205,11 @@ exclude = [
     "regress/nightly/ipB/test_cache/assoc16/pass",
 ]
 
-solution = propose_solution(include, exclude, SolveOptions())
+# Generate patterns (defaults to EXACT mode)
+solution = propose_solution(include, exclude)
 
 # Result: Pattern that matches all "fail" paths but no "pass" paths
-print(solution['raw_expr'])  # likely: *fail*
+print(solution.raw_expr)  # likely: *fail*
 ```
 
 ### Inverted Patterns (NOT Logic)
@@ -211,25 +217,23 @@ print(solution['raw_expr'])  # likely: *fail*
 Sometimes it's easier to specify what you DON'T want:
 
 ```python
-from patternforge.engine.models import InvertStrategy
-
 # Find everything EXCEPT debug paths
 solution = propose_solution(
     include,  # All your paths
     exclude,  # Debug paths
-    SolveOptions(invert=InvertStrategy.ALWAYS)
+    invert="always"  # Force inverted mode
 )
 
 # global_inverted=True means: "everything EXCEPT <pattern>"
-print(solution['global_inverted'])  # True
-print(solution['raw_expr'])  # *debug*
+print(solution.global_inverted)  # True
+print(solution.raw_expr)  # *debug*
 # Interpretation: Match everything EXCEPT paths with "debug"
 ```
 
 **Inversion Strategies:**
-- `NEVER`: Normal mode (find what matches)
-- `ALWAYS`: Complement mode (everything except pattern)
-- `AUTO`: Solver chooses based on cost (default)
+- `"never"`: Normal mode (find what matches)
+- `"always"`: Complement mode (everything except pattern)
+- `"auto"`: Solver chooses based on cost (default)
 
 **See:** `examples/02_single_field_patterns.py` Example 6
 
@@ -248,16 +252,10 @@ Splits on specific characters (`/`, `_`, `-`):
 
 ```python
 # Use classchange for CamelCase, numbers
-solution = propose_solution(
-    include, exclude,
-    SolveOptions(splitmethod='classchange')
-)
+solution = propose_solution(include, exclude, splitmethod='classchange')
 
 # Use char for paths with meaningful segments
-solution = propose_solution(
-    include, exclude,
-    SolveOptions(splitmethod='char')
-)
+solution = propose_solution(include, exclude, splitmethod='char')
 ```
 
 **See:** `examples/02_single_field_patterns.py` Example 8
@@ -283,8 +281,8 @@ exclude_rows = [
 solution = propose_solution_structured(include_rows, exclude_rows)
 
 # Atoms have 'field' attribute showing which field they match
-for atom in solution['atoms']:
-    print(f"{atom['field']}: {atom['text']}")
+for pattern in solution['patterns']:
+    print(f"{pattern['field']}: {pattern['text']}")
 # Output might be:
 #   pin: *DIN* | *DOUT*
 #   instance: *cpu*
@@ -292,7 +290,7 @@ for atom in solution['atoms']:
 
 **Key Differences from Single-Field:**
 - Patterns apply to individual fields, not concatenated string
-- Each atom has a `field` attribute
+- Each pattern has a `field` attribute
 - More precise (can filter on field combinations)
 
 **See:** `examples/03_structured_patterns.py` for 7 comprehensive examples
@@ -302,20 +300,14 @@ for atom in solution['atoms']:
 Prefer patterns on certain fields over others:
 
 ```python
-from patternforge.engine.models import SolveOptions, OptimizeWeights
-
 solution = propose_solution_structured(
     include_rows,
     exclude_rows,
-    options=SolveOptions(
-        weights=OptimizeWeights(
-            w_field={
-                "pin": 3.0,      # Strongly prefer pin patterns
-                "module": 1.5,   # Moderately prefer module patterns
-                "instance": 0.3  # Discourage instance patterns (too broad)
-            }
-        )
-    )
+    w_field={
+        "pin": 3.0,      # Strongly prefer pin patterns
+        "module": 1.5,   # Moderately prefer module patterns
+        "instance": 0.3  # Discourage instance patterns (too broad)
+    }
 )
 ```
 
@@ -335,18 +327,16 @@ Different fields may need different tokenization:
 solution = propose_solution_structured(
     include_rows,
     exclude_rows,
-    options=SolveOptions(
-        splitmethod={
-            "instance": "char",        # Split paths on /
-            "module": "classchange",   # Split CamelCase
-            "pin": "char"             # Split bus notation DIN[0]
-        },
-        min_token_len={              # Can also be per-field!
-            "instance": 2,
-            "module": 3,
-            "pin": 2
-        }
-    )
+    splitmethod={
+        "instance": "char",        # Split paths on /
+        "module": "classchange",   # Split CamelCase
+        "pin": "char"             # Split bus notation DIN[0]
+    },
+    min_token_len={              # Can also be per-field!
+        "instance": 2,
+        "module": 3,
+        "pin": 2
+    }
 )
 ```
 
@@ -379,112 +369,92 @@ df_exclude = pd.DataFrame({
 
 ## Configuration Reference
 
-### SolveOptions
+All configuration is done via direct keyword arguments to `propose_solution()` and `propose_solution_structured()`.
 
-Main configuration object for all solver behavior.
+### Core Settings
 
 ```python
-from patternforge.engine.models import (
-    SolveOptions,
-    OptimizeWeights,
-    OptimizeBudgets,
-    QualityMode,
-    InvertStrategy
-)
+solution = propose_solution(include, exclude,
+    # Quality & Mode
+    mode="EXACT",          # or "APPROX" (case-insensitive)
+    effort="medium",       # "low", "medium", "high", "exhaustive"
+    invert="auto",         # "never", "auto", "always"
 
-options = SolveOptions(
-    # Core settings
-    mode=QualityMode.EXACT,          # or APPROX
-    effort="medium",                  # "low", "medium", "high", "exhaustive"
-
-    # Tokenization (can be dict for per-field)
-    splitmethod="classchange",        # or "char", or {"field": "method"}
-    min_token_len=3,                  # or {"field": int}
+    # Tokenization (can be string or dict for per-field)
+    splitmethod="classchange",  # or "char", or {"field": "method"}
+    min_token_len=3,            # or {"field": int}
 
     # Candidate generation
-    per_word_substrings=16,          # Substrings per token
-    max_multi_segments=3,            # Multi-segment pattern limit
+    per_word_substrings=16,     # Substrings per token
+    max_multi_segments=3,       # Multi-segment pattern limit
+    allowed_patterns=None,      # or ["prefix", "suffix", "substring"]
 
-    # Optimization weights
-    weights=OptimizeWeights(
-        w_field={"pin": 2.0},        # Field preference (always dict)
-        w_fp=1.0,                    # FP cost (scalar or dict)
-        w_fn=1.0,                    # FN cost
-        w_atom=0.05,                 # Atom complexity cost
-        w_op=0.02,                   # Operator complexity cost
-        w_wc=0.01,                   # Wildcard cost
-        w_len=0.001,                 # Length cost
-    ),
+    # Hard constraints (budgets)
+    max_candidates=4000,        # Max candidates to consider
+    max_patterns=None,          # Max patterns (int or 0<float<1 for %)
+    max_fp=0,                   # Max FP (int or percentage)
+    max_fn=None,                # Max FN (int or percentage)
 
-    # Hard constraints
-    budgets=OptimizeBudgets(
-        max_candidates=4000,         # Max candidates to consider
-        max_atoms=None,              # Max atoms (int or 0<float<1 for %)
-        max_fp=0,                    # Max FP (int or percentage)
-        max_fn=None,                 # Max FN (int or percentage)
-    ),
+    # Soft penalties (weights) - scalar or dict
+    w_field={"pin": 2.0},       # Field preference (structured only, always dict)
+    w_fp=1.0,                   # FP cost (scalar or dict)
+    w_fn=1.0,                   # FN cost (scalar or dict)
+    w_pattern=0.05,             # Pattern complexity cost
+    w_op=0.02,                  # Operator complexity cost
+    w_wc=0.01,                  # Wildcard cost
+    w_len=0.001,                # Length cost
 
-    # Single-field specific
-    invert=InvertStrategy.AUTO,
-    allow_complex_expressions=False,
+    # Advanced
+    allow_complex_expressions=False,  # Allow conjunctive expressions
 )
 ```
 
-### OptimizeWeights
+### Parameter Details
 
-All weights can be scalar (apply globally) OR dict (per-field):
+#### Quality & Mode
 
-```python
-OptimizeWeights(
-    # Field preference during candidate generation
-    w_field={"pin": 2.0, "module": 1.5},  # Always dict
+**mode**: `"EXACT"` or `"APPROX"` (case-insensitive)
+- **EXACT**: Zero false positives (guaranteed)
+- **APPROX**: Allows some FP for simpler patterns (2-10x faster)
 
-    # Per-field FP cost
-    w_fp={"module": 2.0, "pin": 1.0, "instance": 0.5},
+**effort**: `"low"`, `"medium"`, `"high"`, `"exhaustive"`
+- Controls quality vs speed trade-off
+- **low**: Fastest, single-field only
+- **medium**: Balanced (default)
+- **high**: Best quality, slower
+- **exhaustive**: Try everything (small datasets only)
 
-    # Global FN cost
-    w_fn=1.0,
+**invert**: `"never"`, `"auto"`, `"always"`
+- **never**: Normal mode (find what matches)
+- **always**: Complement mode (everything except pattern)
+- **auto**: Solver chooses based on cost (default)
 
-    # Per-field atom cost
-    w_atom={"pin": 0.1, "module": 0.05},
+#### Budget Constraints (Hard Limits)
 
-    # Other costs (can also be per-field)
-    w_op=0.02,    # Operator cost
-    w_wc=0.01,    # Wildcard cost
-    w_len=0.001,  # Length cost
-)
-```
+These are hard constraints that the solver MUST satisfy:
 
-**Weight Meanings:**
-- `w_field`: Multiplier for field preference (higher = prefer this field)
-- `w_fp`: Cost per false positive
-- `w_fn`: Cost per false negative
-- `w_atom`: Cost per atom in solution
-- `w_op`: Cost per boolean operation
-- `w_wc`: Cost per wildcard character
-- `w_len`: Cost per character length
+**max_candidates**: int (default: 4000)
+- Maximum candidate patterns to consider
+- Higher = more thorough search, slower
 
-### OptimizeBudgets
+**max_patterns**: int or float (default: None)
+- Maximum patterns in solution
+- `8` = at most 8 patterns
+- `0.10` = at most 10% of include rows
+- `None` = no limit
 
-Hard constraints on the solution:
+**max_fp**: int or float (default: 0 in EXACT mode)
+- Maximum false positives allowed
+- `0` = zero FP (EXACT mode automatic)
+- `5` = at most 5 false positives
+- `0.01` = at most 1% FP
+- `None` = no limit
 
-```python
-OptimizeBudgets(
-    max_candidates=4000,    # Max candidates to consider
-
-    # These support PERCENTAGE or ABSOLUTE:
-    max_atoms=8,            # At most 8 atoms
-    max_atoms=0.10,         # Or: at most 10% of include rows
-
-    max_fp=0,               # Zero FP (EXACT mode)
-    max_fp=5,               # Or: at most 5 false positives
-    max_fp=0.01,            # Or: at most 1% FP
-
-    max_fn=None,            # No limit on FN
-    max_fn=0,               # Or: zero FN (full coverage)
-    max_fn=0.05,            # Or: at most 5% FN
-)
-```
+**max_fn**: int or float (default: None)
+- Maximum false negatives allowed
+- `0` = full coverage required
+- `0.05` = at most 5% FN
+- `None` = no limit
 
 **Percentage Interpretation:**
 - `0 < value < 1`: Percentage of include rows
@@ -492,24 +462,70 @@ OptimizeBudgets(
 - `0`: Zero (exact)
 - `None`: No limit
 
-### Effort Levels
+#### Weights (Soft Penalties)
 
-Controls trade-off between quality and speed:
+These affect the cost function used during greedy selection:
 
-```python
-SolveOptions(effort="low")         # Fastest, single-field only
-SolveOptions(effort="medium")      # Balanced (default)
-SolveOptions(effort="high")        # Best quality, slower
-SolveOptions(effort="exhaustive")  # Try everything (small datasets only)
-```
+**w_field**: dict[str, float] (structured only, default: {})
+- Field preference during candidate generation
+- Higher weight = prefer patterns on this field
+- Example: `{"pin": 3.0, "module": 1.5, "instance": 0.3}`
+- Range: 0.1 (discourage) to 5.0 (strongly prefer)
 
-**Recommendations:**
-- N < 100: Any effort level is fast
-- 100 ≤ N < 1k: Use "medium" (default)
-- 1k ≤ N < 10k: Use "medium" or "low"
-- N ≥ 10k: Use "low"
+**w_fp**: float or dict (default: 1.0)
+- Cost per false positive
+- Can be per-field: `{"module": 2.0, "pin": 1.0}`
+- Higher = penalize FP more heavily
 
-**See:** `examples/04_performance_scaling.py` Test Suite 4
+**w_fn**: float or dict (default: 1.0)
+- Cost per false negative
+- Can be per-field for structured data
+
+**w_pattern**: float or dict (default: 0.05)
+- Cost per pattern in solution
+- Higher = prefer fewer patterns (simpler solutions)
+
+**w_op**: float or dict (default: 0.02)
+- Cost per boolean operation (OR between patterns)
+
+**w_wc**: float or dict (default: 0.01)
+- Cost per wildcard character
+
+**w_len**: float or dict (default: 0.001)
+- Cost per character length
+
+**Weight Usage:**
+- All weights can be scalar (apply globally) or dict (per-field for structured data)
+- `w_field` is always dict (structured mode only)
+- Higher weight = higher penalty = less likely to use
+
+#### Pattern Generation
+
+**allowed_patterns**: list[str] or None (default: None)
+- Restrict pattern types
+- Values: `"exact"`, `"substring"`, `"prefix"`, `"suffix"`, `"multi"`
+- Example: `["prefix", "suffix"]` (only prefix/suffix patterns)
+- `None` = allow all types
+
+**min_token_len**: int or dict (default: 3)
+- Minimum token length to consider
+- Can be per-field: `{"module": 3, "pin": 2}`
+
+**splitmethod**: str or dict (default: "classchange")
+- Tokenization method
+- `"classchange"`: Split on character class changes (CamelCase, numbers)
+- `"char"`: Split on delimiters (`/`, `_`, `-`)
+- Can be per-field: `{"instance": "char", "module": "classchange"}`
+
+**per_word_substrings**: int (default: 16)
+- Top N substrings per token to consider
+
+**max_multi_segments**: int (default: 3)
+- Maximum segments in multi-segment patterns like `*a*b*c*`
+
+**allow_complex_expressions**: bool (default: False)
+- Allow conjunctive expressions (A & B) and subtraction (A - B)
+- More expressive but potentially more complex solutions
 
 ## Performance and Scaling
 
@@ -609,7 +625,7 @@ Speedup: 3x faster
 
 ### Budget Settings
 
-**max_atoms:**
+**max_patterns:**
 - Start with `None` (no limit)
 - If too many patterns, set to 5-10 for simplicity
 - Or use percentage: `0.05` for 5% of rows max
@@ -634,12 +650,12 @@ Speedup: 3x faster
 
 ### Patterns Too Specific
 
-**Symptoms:** Too many atoms, low coverage
+**Symptoms:** Too many patterns, low coverage
 
 **Solutions:**
 1. Use APPROX mode
-2. Decrease `max_atoms` budget
-3. Increase `w_atom` cost
+2. Decrease `max_patterns` budget
+3. Increase `w_pattern` cost
 4. Add `max_fn` budget to allow some FN
 5. Use lower effort level
 
@@ -661,11 +677,15 @@ Speedup: 3x faster
 **Solutions:**
 1. Adjust `w_field` weights
    ```python
-   w_field={"desired_field": 3.0, "wrong_field": 0.3}
+   solution = propose_solution_structured(include, exclude,
+       w_field={"desired_field": 3.0, "wrong_field": 0.3}
+   )
    ```
 2. Increase `w_fp` for wrong field
    ```python
-   w_fp={"wrong_field": 5.0, "desired_field": 1.0}
+   solution = propose_solution_structured(include, exclude,
+       w_fp={"wrong_field": 5.0, "desired_field": 1.0}
+   )
    ```
 3. Add more exclude examples that use wrong field
 
@@ -675,7 +695,7 @@ Speedup: 3x faster
 
 **Solutions:**
 1. Check if include/exclude have overlap (unsolvable)
-2. Relax budgets (`max_atoms=None`, `max_fn` tolerance)
+2. Relax budgets (`max_patterns=None`, `max_fn` tolerance)
 3. Lower `min_token_len` (default=3)
 4. Check tokenization method (try both `classchange` and `char`)
 
@@ -717,23 +737,23 @@ The evaluator supports complex boolean logic:
 ```python
 from patternforge.engine.solver import evaluate_expr
 
-atoms = {
+patterns = {
     "P1": "*cpu*",
     "P2": "*cache*",
     "P3": "*debug*"
 }
 
 # AND
-metrics = evaluate_expr("P1 & P2", atoms, include, exclude)
+metrics = evaluate_expr("P1 & P2", patterns, include, exclude)
 
 # OR
-metrics = evaluate_expr("P1 | P2", atoms, include, exclude)
+metrics = evaluate_expr("P1 | P2", patterns, include, exclude)
 
 # NOT
-metrics = evaluate_expr("!P3", atoms, include, exclude)
+metrics = evaluate_expr("!P3", patterns, include, exclude)
 
 # Complex
-metrics = evaluate_expr("(P1 & P2) & !P3", atoms, include, exclude)
+metrics = evaluate_expr("(P1 & P2) & !P3", patterns, include, exclude)
 ```
 
 ### Persistence
@@ -743,14 +763,15 @@ Save and load solutions:
 ```python
 from patternforge import io
 
-# Save
-io.save_solution(solution, "solution.json")
+# Convert solution to dict for saving
+solution_dict = solution.to_json()
+io.save_solution(solution_dict, "solution.json")
 
 # Load
 loaded = io.load_solution("solution.json")
 
-# Extract just atoms for evaluation
-atoms_dict = {atom["id"]: atom["text"] for atom in loaded["atoms"]}
+# Extract just patterns for evaluation
+patterns_dict = {pattern["id"]: pattern["text"] for pattern in loaded["patterns"]}
 ```
 
 ### DataFrame Support

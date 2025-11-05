@@ -34,14 +34,14 @@ class OptimizeWeights:
         - Can be scalar (global) or dict (per-field)
         - Example: w_fp={"module": 10.0, "pin": 1.0} means FPs on module hurt 10x more
 
-    w_atom, w_op, w_wc, w_len: Complexity penalties
+    w_pattern, w_op, w_wc, w_len: Complexity penalties
         - Applied during greedy selection
         - Can be scalar (global) or dict (per-field)
     """
     w_field: dict[str, float] | None = None
     w_fp: float | dict[str, float] = 1.0
     w_fn: float | dict[str, float] = 1.0
-    w_atom: float | dict[str, float] = 0.05
+    w_pattern: float | dict[str, float] = 0.05
     w_op: float | dict[str, float] = 0.02
     w_wc: float | dict[str, float] = 0.01
     w_len: float | dict[str, float] = 0.001
@@ -51,7 +51,7 @@ class OptimizeWeights:
 class OptimizeBudgets:
     """Hard constraints on solution search.
 
-    For max_fp, max_fn, max_atoms:
+    For max_fp, max_fn, max_patterns:
     - int >= 1: absolute count (e.g., max_fp=5 means "at most 5 false positives")
     - 0 < float < 1: percentage of include rows (e.g., max_fp=0.01 means "at most 1% FP rate")
     - 0: zero (no FPs/FNs allowed)
@@ -60,7 +60,7 @@ class OptimizeBudgets:
     max_candidates: absolute count only (total candidates unknown beforehand)
     """
     max_candidates: int = 4000
-    max_atoms: int | float | None = None
+    max_patterns: int | float | None = None
     max_fp: int | float | None = None
     max_fn: int | float | None = None
 
@@ -72,6 +72,11 @@ class SolveOptions:
     Per-field parameters (splitmethod, min_token_len):
     - Scalar value applies to all fields
     - Dict with per-field values: unspecified fields use hardcoded default
+
+    allowed_patterns: Restrict generated pattern types
+    - None (default): all pattern types allowed ("exact", "substring", "prefix", "suffix", "multi")
+    - list/set of str: global filter (e.g., ["prefix", "suffix"] allows only anchored patterns)
+    - dict[str, list/set]: per-field filter (e.g., {"module": ["prefix"], "pin": ["substring", "exact"]})
     """
     # Core settings
     mode: QualityMode = QualityMode.EXACT
@@ -84,6 +89,7 @@ class SolveOptions:
     # Candidate generation
     per_word_substrings: int = 16
     max_multi_segments: int = 3
+    allowed_patterns: list[str] | set[str] | dict[str, list[str] | set[str]] | None = None
 
     # Optimization
     weights: OptimizeWeights = field(default_factory=OptimizeWeights)
@@ -101,6 +107,7 @@ class SolveOptions:
             min_token_len=self.min_token_len,
             per_word_substrings=self.per_word_substrings,
             max_multi_segments=self.max_multi_segments,
+            allowed_patterns=self.allowed_patterns,
             invert=self.invert,
             weights=self.weights,
             budgets=self.budgets,
@@ -109,7 +116,7 @@ class SolveOptions:
 
 
 @dataclass(frozen=True)
-class Atom:
+class Pattern:
     id: str
     text: str
     kind: str
@@ -141,7 +148,7 @@ class Solution:
     term_method: str
     mode: str
     options: dict[str, object]
-    atoms: list[Atom]
+    patterns: list[Pattern]
     metrics: dict[str, int]
     witnesses: dict[str, list[str]]
     expressions: list[dict[str, object]]
@@ -154,7 +161,7 @@ class Solution:
             "term_method": self.term_method,
             "mode": self.mode,
             "options": self.options,
-            "atoms": [atom.__dict__ for atom in self.atoms],
+            "patterns": [pattern.__dict__ for pattern in self.patterns],
             "metrics": self.metrics,
             "witnesses": self.witnesses,
             "expressions": self.expressions,
