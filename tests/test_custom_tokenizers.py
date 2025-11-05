@@ -55,7 +55,6 @@ def test_generate_candidates_with_custom_iter() -> None:
         splitmethod="classchange",
         min_token_len=100,  # would eliminate default tokens if used
         per_word_substrings=8,
-        per_word_multi=4,
         max_multi_segments=3,
         token_iter=custom_iter,
     )

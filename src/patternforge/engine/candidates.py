@@ -29,10 +29,9 @@ def generate_candidates(
     splitmethod: str,
     min_token_len: int,
     per_word_substrings: int,
-    per_word_multi: int,
     max_multi_segments: int,
     token_iter: Iterable[tuple] | None = None,
-    field_weights: dict[str, float] | None = None,
+    w_field: dict[str, float] | None = None,
 ) -> list[tuple[str, str, float, str | None]]:
     pool = CandidatePool()
     token_lists: dict[int, list[str]] = defaultdict(list)
@@ -49,8 +48,8 @@ def generate_candidates(
 
     # Helper to apply field weight to score
     def apply_weight(score: float, field: str | None) -> float:
-        if field_weights and field:
-            weight = field_weights.get(field, 1.0)
+        if w_field and field:
+            weight = w_field.get(field, 1.0)
             return score * weight
         return score
 

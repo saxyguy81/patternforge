@@ -17,15 +17,11 @@ def _options(invert: InvertStrategy = InvertStrategy.NEVER) -> SolveOptions:
         mode=QualityMode.EXACT,
         invert=invert,
         weights=OptimizeWeights(),
-        budgets=OptimizeBudgets(max_candidates=128, max_atoms=8, max_ops=8, depth=2),
-        allow_not_on_atoms=True,
+        budgets=OptimizeBudgets(max_candidates=128, max_atoms=8),
         min_token_len=3,
         per_word_substrings=8,
-        per_word_multi=4,
-        per_word_cuts=16,
         max_multi_segments=3,
         splitmethod="classchange",
-        seed=0,
     )
 
 

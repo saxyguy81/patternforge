@@ -165,10 +165,7 @@ def _resolve_budgets(args: argparse.Namespace, mode: QualityMode) -> OptimizeBud
     defaults = _quality_defaults(mode)
     return OptimizeBudgets(
         max_candidates=args.max_candidates,
-        max_atoms=args.max_atoms if args.max_atoms is not None else defaults["max_atoms"],
-        max_ops=args.max_ops if args.max_ops is not None else defaults["max_ops"],
-        depth=args.depth if args.depth is not None else defaults["depth"],
-        max_multi_segments=args.max_multi_segments,
+        max_atoms=args.max_atoms if args.max_atoms is not None else defaults.get("max_atoms"),
         max_fp=args.max_fp,
         max_fn=args.max_fn,
     )
@@ -181,18 +178,15 @@ def _build_options(args: argparse.Namespace) -> SolveOptions:
     invert = _parse_invert(args.invert)
     return SolveOptions(
         mode=mode,
+        effort=getattr(args, 'effort', 'medium'),
+        splitmethod=args.splitmethod,
+        min_token_len=args.min_token_len,
+        per_word_substrings=args.per_word_substrings,
+        max_multi_segments=args.max_multi_segments,
         invert=invert,
         weights=weights,
         budgets=budgets,
-        allow_not_on_atoms=args.allow_not_on_atoms,
-        allow_complex_terms=args.allow_complex_terms,
-        min_token_len=args.min_token_len,
-        per_word_substrings=args.per_word_substrings,
-        per_word_multi=args.per_word_multi,
-        per_word_cuts=args.per_word_cuts,
-        max_multi_segments=args.max_multi_segments,
-        splitmethod=args.splitmethod,
-        seed=args.seed,
+        allow_complex_expressions=getattr(args, 'allow_complex_expressions', False),
     )
 
 
@@ -326,7 +320,6 @@ def _command_dump_candidates(args: argparse.Namespace) -> None:
         splitmethod=args.splitmethod,
         min_token_len=args.min_token_len,
         per_word_substrings=args.per_word_substrings,
-        per_word_multi=args.per_word_multi,
         max_multi_segments=args.max_multi_segments,
     )
     top = generated[: args.top]

@@ -9,16 +9,12 @@ def _opts_complex() -> SolveOptions:
     return SolveOptions(
         mode=QualityMode.EXACT,
         invert=InvertStrategy.NEVER,
-        budgets=OptimizeBudgets(max_candidates=256, max_atoms=8, max_ops=8, depth=2),
-        allow_not_on_atoms=True,
-        allow_complex_terms=True,
+        budgets=OptimizeBudgets(max_candidates=256, max_atoms=8),
+        allow_complex_expressions=True,
         min_token_len=3,
         per_word_substrings=8,
-        per_word_multi=4,
-        per_word_cuts=16,
         max_multi_segments=3,
         splitmethod="classchange",
-        seed=0,
     )
 
 
@@ -33,11 +29,11 @@ def test_conjunction_term_present_and_reduces_fp() -> None:
         "debug/bank/zzz",
     ]
     sol = propose_solution(include, exclude, _opts_complex())
-    # Expect at least one term containing an '&'
-    terms = sol.get("terms", [])
-    assert any("&" in t.get("expr", "") or "&" in t.get("raw_expr", "") for t in terms)
+    # Expect at least one expression containing an '&'
+    expressions = sol.get("expressions", [])
+    assert any("&" in t.get("expr", "") or "&" in t.get("raw_expr", "") for t in expressions)
     # Find that conjunction and assert it has lower fp than components would individually
-    conj = next(t for t in terms if "&" in t.get("expr", "") or "&" in t.get("raw_expr", ""))
+    conj = next(t for t in expressions if "&" in t.get("expr", "") or "&" in t.get("raw_expr", ""))
     assert conj["fp"] == 0
     assert conj["tp"] == 2
 
@@ -51,9 +47,9 @@ def test_and_not_term_present_and_reduces_fp() -> None:
         "dbg/cache",
     ]
     sol = propose_solution(include, exclude, _opts_complex())
-    terms = sol.get("terms", [])
-    # Expect a '-' based term
-    assert any("-" in t.get("expr", "") or "-" in t.get("raw_expr", "") for t in terms)
-    minus = next(t for t in terms if "-" in t.get("expr", "") or "-" in t.get("raw_expr", ""))
+    expressions = sol.get("expressions", [])
+    # Expect a '-' based expression
+    assert any("-" in t.get("expr", "") or "-" in t.get("raw_expr", "") for t in expressions)
+    minus = next(t for t in expressions if "-" in t.get("expr", "") or "-" in t.get("raw_expr", ""))
     assert minus["fp"] == 0
     assert minus["tp"] == 2

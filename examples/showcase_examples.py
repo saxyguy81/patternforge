@@ -153,7 +153,6 @@ candidates = generate_candidates(
     splitmethod='classchange',
     min_token_len=3,
     per_word_substrings=True,
-    per_word_multi=False,
     max_multi_segments=3,
     token_iter=None
 )

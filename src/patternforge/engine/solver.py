@@ -27,7 +27,6 @@ class _Context:
     include_rows: Sequence[object] | None = None
     exclude_rows: Sequence[object] | None = None
     field_getter: callable | None = None
-    field_weights: dict[str, float] | None = None
 
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
@@ -40,14 +39,25 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 }
 
 
-def _resolve_weights(options: SolveOptions) -> dict[str, float]:
+def _resolve_weights(options: SolveOptions, field: str | None = None) -> dict[str, float]:
+    """Resolve weights for cost function, with optional per-field support.
+
+    Args:
+        options: SolveOptions with weights
+        field: Optional field name for per-field weight resolution
+
+    Returns:
+        Dict of resolved weight values for cost function
+    """
+    from .utils import get_weight_value
+
     weights = dict(_DEFAULT_WEIGHTS)
-    weights["w_fp"] = options.weights.w_fp
-    weights["w_fn"] = options.weights.w_fn
-    weights["w_atom"] = options.weights.w_atom
-    weights["w_op"] = options.weights.w_op
-    weights["w_wc"] = options.weights.w_wc
-    weights["w_len"] = options.weights.w_len
+    weights["w_fp"] = get_weight_value(options.weights.w_fp, field)
+    weights["w_fn"] = get_weight_value(options.weights.w_fn, field)
+    weights["w_atom"] = get_weight_value(options.weights.w_atom, field)
+    weights["w_op"] = get_weight_value(options.weights.w_op, field)
+    weights["w_wc"] = get_weight_value(options.weights.w_wc, field)
+    weights["w_len"] = get_weight_value(options.weights.w_len, field)
     return weights
 
 
@@ -72,13 +82,12 @@ def _cost(selection: _Selection, include_size: int, weights: dict[str, float]) -
 def _build_candidates(ctx: _Context) -> list[Candidate]:
     generated = generate_candidates(
         ctx.include,
-        splitmethod=ctx.options.splitmethod,
-        min_token_len=ctx.options.min_token_len,
+        splitmethod=ctx.options.splitmethod if isinstance(ctx.options.splitmethod, str) else "classchange",
+        min_token_len=ctx.options.min_token_len if isinstance(ctx.options.min_token_len, int) else 3,
         per_word_substrings=ctx.options.per_word_substrings,
-        per_word_multi=ctx.options.per_word_multi,
         max_multi_segments=ctx.options.max_multi_segments,
         token_iter=ctx.token_iter,
-        field_weights=ctx.field_weights,
+        w_field=ctx.options.weights.w_field,
     )
     candidates: list[Candidate] = []
     limit = ctx.options.budgets.max_candidates
@@ -117,9 +126,17 @@ def _build_candidates(ctx: _Context) -> list[Candidate]:
 
 
 def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
+    from .utils import resolve_budget_limit
+
     weights = _resolve_weights(ctx.options)
     selection = _Selection(chosen=[], include_bits=0, exclude_bits=0)
     best_cost = _cost(selection, len(ctx.include), weights)
+
+    # Convert percentage budgets to absolute limits
+    max_fp = resolve_budget_limit(ctx.options.budgets.max_fp, len(ctx.include))
+    max_fn = resolve_budget_limit(ctx.options.budgets.max_fn, len(ctx.include))
+    max_atoms = resolve_budget_limit(ctx.options.budgets.max_atoms, len(ctx.include))
+
     changed = True
     while changed:
         changed = False
@@ -136,9 +153,9 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
             # Check budget constraints
             trial_fp = bitset.count_bits(trial.exclude_bits)
             trial_fn = len(ctx.include) - bitset.count_bits(trial.include_bits)
-            if ctx.options.budgets.max_fp is not None and trial_fp > ctx.options.budgets.max_fp:
+            if max_fp is not None and trial_fp > max_fp:
                 continue  # Skip candidates that violate max_fp constraint
-            if ctx.options.budgets.max_fn is not None and trial_fn > ctx.options.budgets.max_fn:
+            if max_fn is not None and trial_fn > max_fn:
                 continue  # Skip candidates that violate max_fn constraint
             trial_cost = _cost(trial, len(ctx.include), weights)
             gain = bitset.count_bits(selection.include_bits)
@@ -165,8 +182,8 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
                 best_candidate_cost = trial_cost
                 best_candidate = candidate
         within_limit = (
-            ctx.options.budgets.max_atoms is None
-            or len(selection.chosen) < ctx.options.budgets.max_atoms
+            max_atoms is None
+            or len(selection.chosen) < max_atoms
         )
         if best_candidate is not None and within_limit:
             new_include_bits = selection.include_bits | best_candidate.include_bits
@@ -614,26 +631,20 @@ def propose_solution(
     if options.mode == QualityMode.EXACT and options.budgets.max_fp is None:
         options = SolveOptions(
             mode=options.mode,
+            effort=options.effort,
+            splitmethod=options.splitmethod,
+            min_token_len=options.min_token_len,
+            per_word_substrings=options.per_word_substrings,
+            max_multi_segments=options.max_multi_segments,
             invert=options.invert,
             weights=options.weights,
             budgets=OptimizeBudgets(
                 max_candidates=options.budgets.max_candidates,
                 max_atoms=options.budgets.max_atoms,
-                max_ops=options.budgets.max_ops,
-                depth=options.budgets.depth,
-                max_multi_segments=options.budgets.max_multi_segments,
                 max_fp=0,  # Enforce zero false positives in EXACT mode
                 max_fn=options.budgets.max_fn,
             ),
-            allow_not_on_atoms=options.allow_not_on_atoms,
             allow_complex_expressions=options.allow_complex_expressions,
-            min_token_len=options.min_token_len,
-            per_word_substrings=options.per_word_substrings,
-            per_word_multi=options.per_word_multi,
-            per_word_cuts=options.per_word_cuts,
-            max_multi_segments=options.max_multi_segments,
-            splitmethod=options.splitmethod,
-            seed=options.seed,
         )
     ctx = _Context(include=include, exclude=exclude, options=options, token_iter=token_iter)
     candidates = _build_candidates(ctx)
@@ -676,12 +687,7 @@ def propose_solution_structured(
     include_rows: Sequence[object],
     exclude_rows: Sequence[object] | None = None,
     fields: list[str] | None = None,
-    field_weights: dict[str, float] | None = None,
-    splitmethod: str | dict[str, str] = "classchange",
-    min_token_len: int = 3,
     options: SolveOptions | None = None,
-    mode: str = "EXACT",
-    effort: str = "medium",  # NEW: "low", "medium", "high", "exhaustive"
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
 ) -> dict[str, object]:
@@ -700,26 +706,10 @@ def propose_solution_structured(
 
         fields: Field names (auto-detected from dict keys or DataFrame columns)
 
-        field_weights: Prefer patterns on certain fields
-            - Higher weight = prefer patterns on this field
-            - Lower weight = discourage patterns on this field
-            - Example: {"module": 2.0, "pin": 2.0, "instance": 0.5}
-
-        splitmethod: Tokenization method
-            - String: Same method for all fields ("classchange" or "char")
-            - Dict: Per-field methods {"instance": "char", "module": "classchange"}
-
-        min_token_len: Minimum token length (default 3)
-
-        options: Advanced SolveOptions (overrides other parameters)
-
-        mode: "EXACT" (zero false positives) or "APPROX" (allow some FP)
-
-        effort: Complexity vs quality trade-off (NEW!)
-            - "low": Fast, minimal candidates, O(N) - use for quick results
-            - "medium": Balanced, adaptive selection (default)
-            - "high": Best quality, more candidates
-            - "exhaustive": Try everything - only for N < 100, F < 5
+        options: SolveOptions with all configuration
+            - Use OptimizeWeights.w_field for field preferences
+            - Use splitmethod/min_token_len (scalar or dict) for per-field tokenization
+            - Use effort for algorithm selection
 
         token_iter: [Advanced] Pre-generated token iterator (auto-generated if None)
 
@@ -736,33 +726,22 @@ def propose_solution_structured(
         ... ]
         >>> solution = propose_solution_structured(include, exclude)
 
-        >>> # With field weights
-        >>> solution = propose_solution_structured(
-        ...     include, exclude,
-        ...     field_weights={"module": 2.0, "pin": 2.0, "instance": 0.5}
+        >>> # With field preferences
+        >>> from patternforge.engine.models import SolveOptions, OptimizeWeights
+        >>> options = SolveOptions(
+        ...     weights=OptimizeWeights(
+        ...         w_field={"module": 2.0, "pin": 2.0, "instance": 0.5}
+        ...     )
         ... )
-
-        >>> # DataFrame input
-        >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     'module': ['SRAM', 'SRAM'],
-        ...     'instance': ['cpu/cache', 'cpu/cache'],
-        ...     'pin': ['DIN', 'DOUT']
-        ... })
-        >>> solution = propose_solution_structured(df, df_exclude)
+        >>> solution = propose_solution_structured(include, exclude, options=options)
 
         >>> # High effort for best quality (slower)
-        >>> solution = propose_solution_structured(
-        ...     include, exclude,
-        ...     effort="high"
-        ... )
+        >>> options = SolveOptions(effort="high")
+        >>> solution = propose_solution_structured(include, exclude, options=options)
 
         >>> # Low effort for quick results
-        >>> solution = propose_solution_structured(
-        ...     large_dataset,  # 10k rows
-        ...     large_excludes,
-        ...     effort="low"  # Fast, O(N)
-        ... )
+        >>> options = SolveOptions(effort="low")
+        >>> solution = propose_solution_structured(large_dataset, large_excludes, options=options)
     """
     from .tokens import make_split_tokenizer, iter_structured_tokens_with_fields
 
@@ -803,27 +782,18 @@ def propose_solution_structured(
 
     # Create default options if not provided
     if options is None:
-        from .models import QualityMode
-        quality_mode = QualityMode.EXACT if mode == "EXACT" else QualityMode.APPROX
-        options = SolveOptions(
-            mode=quality_mode,
-            splitmethod=splitmethod if isinstance(splitmethod, str) else "classchange",
-            min_token_len=min_token_len
-        )
+        options = SolveOptions()
 
-    # Generate field tokenizers from splitmethod
+    # Extract per-field configuration with utils
+    from .utils import get_field_value
+
+    # Generate field tokenizers from options.splitmethod
     if token_iter is None:
-        if isinstance(splitmethod, str):
-            # All fields use same method
-            tokenizer = make_split_tokenizer(splitmethod, min_token_len=min_token_len)
-            field_tokenizers = {f: tokenizer for f in fields}
-        else:
-            # Per-field methods with default fallback
-            default_method = splitmethod.get("__default__", "classchange")
-            field_tokenizers = {}
-            for f in fields:
-                method = splitmethod.get(f, default_method)
-                field_tokenizers[f] = make_split_tokenizer(method, min_token_len=min_token_len)
+        field_tokenizers = {}
+        for f in fields:
+            method = get_field_value(options.splitmethod, f, "classchange")
+            min_len = get_field_value(options.min_token_len, f, 3)
+            field_tokenizers[f] = make_split_tokenizer(method, min_token_len=min_len)
 
         # Generate token iterator automatically
         token_iter = list(iter_structured_tokens_with_fields(
@@ -835,7 +805,7 @@ def propose_solution_structured(
     # Adaptive algorithm selection based on N, F, and effort
     from .adaptive import select_algorithm, get_effort_from_string, AlgorithmChoice
 
-    effort_level = get_effort_from_string(effort)
+    effort_level = get_effort_from_string(options.effort)
     algorithm, config = select_algorithm(
         num_include=len(include_rows),
         num_exclude=len(exclude_rows),
@@ -851,8 +821,7 @@ def propose_solution_structured(
             exclude_rows,
             fields,
             field_getter or _default_field_getter,
-            field_weights,
-            options or SolveOptions(),
+            options,
             config
         )
     else:
@@ -863,7 +832,6 @@ def propose_solution_structured(
             options,
             token_iter=token_iter,
             field_getter=field_getter,
-            field_weights=field_weights,
             config=config
         )
 
@@ -873,7 +841,6 @@ def _propose_solution_structured_scalable(
     exclude_rows: Sequence[dict],
     field_names: list[str],
     field_getter: Callable,
-    field_weights: dict[str, float] | None,
     options: SolveOptions,
     config: dict,
 ) -> dict[str, object]:
@@ -887,6 +854,7 @@ def _propose_solution_structured_scalable(
     )
     from .models import Atom, Solution
     from . import bitset
+    from .utils import resolve_budget_limit
 
     # Generate global patterns per field
     field_patterns = generate_field_patterns_scalable(
@@ -897,7 +865,9 @@ def _propose_solution_structured_scalable(
     )
 
     # Greedy set cover with lazy multi-field construction
-    max_fp = options.budgets.max_fp if options.budgets.max_fp is not None else 0
+    max_fp = resolve_budget_limit(options.budgets.max_fp, len(include_rows))
+    if max_fp is None:
+        max_fp = 0  # Default to zero FP for structured
     selected_expressions = greedy_set_cover_structured(
         include_rows,
         exclude_rows,
@@ -905,7 +875,7 @@ def _propose_solution_structured_scalable(
         field_patterns,
         field_getter,
         max_fp=max_fp,
-        field_weights=field_weights
+        field_weights=options.weights.w_field
     )
 
     # Build solution
@@ -1002,7 +972,6 @@ def _propose_solution_structured_bounded(
     options: SolveOptions,
     token_iter: list[tuple] | None = None,
     field_getter: callable | None = None,
-    field_weights: dict[str, float] | None = None,
     config: dict | None = None,
 ) -> dict[str, object]:
     """
@@ -1013,6 +982,7 @@ def _propose_solution_structured_bounded(
         generate_structured_expression_candidates,
         greedy_select_structured_expressions,
     )
+    from .utils import resolve_budget_limit
 
     # Determine field names
     if include_rows and isinstance(include_rows[0], dict):
@@ -1077,12 +1047,14 @@ def _propose_solution_structured_bounded(
         field_names=field_names,
         field_patterns=field_patterns,
         field_getter=field_getter,
-        field_weights=field_weights,
-        max_terms_per_row=50,
+        field_weights=options.weights.w_field,
+        max_expressions_per_row=50,
     )
 
     # Greedy select terms
-    max_fp = options.budgets.max_fp if options.budgets.max_fp is not None else 0
+    max_fp = resolve_budget_limit(options.budgets.max_fp, len(include_rows))
+    if max_fp is None:
+        max_fp = 0  # Default to zero FP for structured
     selected_expressions = greedy_select_structured_expressions(
         expressions=expression_candidates,
         num_include=len(include_rows),

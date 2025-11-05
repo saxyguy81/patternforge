@@ -9,16 +9,12 @@ def _options(**kwargs) -> SolveOptions:
     opts = SolveOptions(
         mode=QualityMode.EXACT,
         invert=InvertStrategy.NEVER,
-        budgets=OptimizeBudgets(max_candidates=256, max_atoms=8, max_ops=8, depth=2),
-        allow_not_on_atoms=True,
-        allow_complex_terms=kwargs.get("allow_complex_terms", False),
+        budgets=OptimizeBudgets(max_candidates=256, max_atoms=8),
+        allow_complex_expressions=kwargs.get("allow_complex_expressions", False),
         min_token_len=3,
         per_word_substrings=8,
-        per_word_multi=4,
-        per_word_cuts=16,
         max_multi_segments=3,
         splitmethod="classchange",
-        seed=0,
     )
     return opts
 
@@ -35,9 +31,9 @@ def test_terms_residual_sums_to_covered() -> None:
         "zzz/yyy",
     ]
     sol = propose_solution(include, exclude, _options())
-    assert "terms" in sol and isinstance(sol["terms"], list)
+    assert "expressions" in sol and isinstance(sol["expressions"], list)
     covered = sol["metrics"]["covered"]
-    residual_sum = sum(t.get("incremental_tp", 0) for t in sol["terms"])
+    residual_sum = sum(t.get("incremental_tp", 0) for t in sol["expressions"])
     assert residual_sum == covered
 
 
@@ -46,7 +42,7 @@ def test_terms_fields_present_and_flag() -> None:
     exclude: list[str] = ["alpha/dbg"]
     sol = propose_solution(include, exclude, _options())
     assert sol.get("term_method") == "additive"
-    term = sol["terms"][0]
+    term = sol["expressions"][0]
     for key in ("expr", "raw_expr", "tp", "fp", "fn", "incremental_tp", "incremental_fp", "length"):
         assert key in term
 
@@ -65,6 +61,6 @@ def test_terms_with_allow_complex_terms_flag() -> None:
     exclude = ["alpha/debug", "beta/debug"]
     sol = propose_solution(include, exclude, _options(allow_complex_terms=True))
     # Complex terms may or may not form conjunctions; ensure schema remains stable
-    assert isinstance(sol.get("terms", []), list)
-    for t in sol["terms"]:
+    assert isinstance(sol.get("expressions", []), list)
+    for t in sol["expressions"]:
         assert set(["expr", "raw_expr", "tp", "fp", "fn", "incremental_tp", "incremental_fp", "length"]).issubset(t.keys())

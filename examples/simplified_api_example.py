@@ -2,14 +2,15 @@
 """
 Example demonstrating the simplified structured API.
 
-This shows how the new API reduces complexity from 10+ lines of boilerplate
-to just 1-2 lines for common use cases, while still supporting advanced options.
+This shows how the new unified API consolidates all configuration into SolveOptions,
+with field preferences via w_field and support for per-field customization.
 """
 
 import sys
 sys.path.insert(0, "../src")
 
 from patternforge.engine.solver import propose_solution_structured
+from patternforge.engine.models import SolveOptions, OptimizeWeights
 
 print("=" * 80)
 print("SIMPLIFIED STRUCTURED API EXAMPLES")
@@ -82,13 +83,21 @@ print("\nCode:")
 print("""
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    field_weights={"pin": 2.0, "instance": 0.5}
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_field={"pin": 2.0, "instance": 0.5}
+        )
+    )
 )
 """)
 
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    field_weights={"pin": 2.0, "instance": 0.5}
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_field={"pin": 2.0, "instance": 0.5}
+        )
+    )
 )
 
 print(f"\nResult:")
@@ -113,17 +122,21 @@ print("\nCode:")
 print("""
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    splitmethod={
-        "instance": "char",
-        "module": "classchange",
-        "pin": "char"
-    }
+    options=SolveOptions(
+        splitmethod={
+            "instance": "char",
+            "module": "classchange",
+            "pin": "char"
+        }
+    )
 )
 """)
 
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    options=SolveOptions(
+        splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    )
 )
 
 print(f"\nResult:")
@@ -142,15 +155,23 @@ print("\nCode:")
 print("""
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    field_weights={"pin": 2.0, "module": 1.5, "instance": 0.3},
-    splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_field={"pin": 2.0, "module": 1.5, "instance": 0.3}
+        ),
+        splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    )
 )
 """)
 
 solution = propose_solution_structured(
     include_rows, exclude_rows,
-    field_weights={"pin": 2.0, "module": 1.5, "instance": 0.3},
-    splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    options=SolveOptions(
+        weights=OptimizeWeights(
+            w_field={"pin": 2.0, "module": 1.5, "instance": 0.3}
+        ),
+        splitmethod={"instance": "char", "module": "classchange", "pin": "char"}
+    )
 )
 
 print(f"\nResult:")

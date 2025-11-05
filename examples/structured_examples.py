@@ -19,15 +19,10 @@ def print_structured_example(title, include_rows, exclude_rows, description=""):
     if description:
         print(f"\n{description}")
 
-    # Field getter for dict rows
-    def field_getter(row, field):
-        return row.get(field, "")
-
     solution = propose_solution_structured(
         include_rows,
         exclude_rows,
-        SolveOptions(splitmethod="classchange"),
-        field_getter=field_getter
+        options=SolveOptions(splitmethod="classchange")
     )
 
     print(f"\n📥 INPUT:")

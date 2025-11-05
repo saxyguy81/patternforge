@@ -10,7 +10,6 @@ def test_generate_candidates_basic() -> None:
         splitmethod="classchange",
         min_token_len=3,
         per_word_substrings=8,
-        per_word_multi=4,
         max_multi_segments=3,
     )
     assert result

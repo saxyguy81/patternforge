@@ -24,7 +24,6 @@ def test_propose_solution_structured_per_field_atoms() -> None:
         splitmethod="classchange",
         min_token_len=3,
         per_word_substrings=8,
-        per_word_multi=4,
         max_multi_segments=3,
         token_iter=token_iter,
     )
@@ -32,7 +31,7 @@ def test_propose_solution_structured_per_field_atoms() -> None:
     sol = propose_solution_structured(
         include_rows,
         exclude_rows,
-        SolveOptions(mode=QualityMode.APPROX),
+        options=SolveOptions(mode=QualityMode.APPROX),
         token_iter=token_iter,
     )
     assert sol["atoms"]
@@ -64,10 +63,10 @@ def test_structured_minus_term_fields() -> None:
     tk = make_split_tokenizer("classchange", min_token_len=3)
     fts = {"module": tk, "instance": tk, "pin": tk}
     tok_iter = list(iter_structured_tokens_with_fields(include_rows, fts, field_order=["module", "instance", "pin"]))
-    sol = propose_solution_structured(include_rows, exclude_rows, SolveOptions(mode=QualityMode.EXACT, allow_complex_terms=True), token_iter=tok_iter)
-    # Either a minus term exists or the positive term(s) suffice; when minus exists, it should reduce FP and carry not_fields
-    minus_terms = [t for t in sol.get("terms", []) if "-" in t.get("expr", "") or "-" in t.get("raw_expr", "")]
-    for t in minus_terms:
+    sol = propose_solution_structured(include_rows, exclude_rows, options=SolveOptions(mode=QualityMode.EXACT, allow_complex_expressions=True), token_iter=tok_iter)
+    # Either a minus expression exists or the positive expression(s) suffice; when minus exists, it should reduce FP and carry not_fields
+    minus_expressions = [t for t in sol.get("expressions", []) if "-" in t.get("expr", "") or "-" in t.get("raw_expr", "")]
+    for t in minus_expressions:
         assert t.get("fp", 0) == 0
         # not_fields may be present for structured atom pairing
         nf = t.get("not_fields", {})
