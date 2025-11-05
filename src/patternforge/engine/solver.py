@@ -840,159 +840,181 @@ def _propose_solution_structured_impl(
     - field_getter: optional function(row, field_name) -> str
     - field_weights: optional dict mapping field names to weights (higher = prefer patterns on this field)
     """
-    # In EXACT mode, automatically enforce max_fp=0 if not already set
-    from .models import QualityMode, OptimizeBudgets
-    if options.mode == QualityMode.EXACT and options.budgets.max_fp is None:
-        options = SolveOptions(
-            mode=options.mode,
-            invert=options.invert,
-            weights=options.weights,
-            budgets=OptimizeBudgets(
-                max_candidates=options.budgets.max_candidates,
-                max_atoms=options.budgets.max_atoms,
-                max_ops=options.budgets.max_ops,
-                depth=options.budgets.depth,
-                max_multi_segments=options.budgets.max_multi_segments,
-                max_fp=0,  # Enforce zero false positives in EXACT mode
-                max_fn=options.budgets.max_fn,
-            ),
-            allow_not_on_atoms=options.allow_not_on_atoms,
-            allow_complex_terms=options.allow_complex_terms,
-            min_token_len=options.min_token_len,
-            per_word_substrings=options.per_word_substrings,
-            per_word_multi=options.per_word_multi,
-            per_word_cuts=options.per_word_cuts,
-            max_multi_segments=options.max_multi_segments,
-            splitmethod=options.splitmethod,
-            seed=options.seed,
-        )
-    # Build canonical strings for matching text/witnesses
-    def canon(row: object) -> str:
-        if isinstance(row, dict):
-            return "/".join(str(v) for v in row.values() if v)
-        if isinstance(row, (list, tuple)):
-            return "/".join(str(v) for v in row if v)
-        return str(row)
+    from .structured_terms import (
+        generate_structured_term_candidates,
+        greedy_select_structured_terms,
+    )
 
-    include = [canon(r) for r in include_rows]
-    exclude = [canon(r) for r in exclude_rows]
+    # Determine field names
+    if include_rows and isinstance(include_rows[0], dict):
+        field_names = list(include_rows[0].keys())
+    else:
+        # Infer from token_iter
+        field_names = list(set(field for _, _, field in (token_iter or [])))
 
-    ctx = _Context(
-        include=include,
-        exclude=exclude,
-        options=options,
-        token_iter=token_iter,  # should carry field info
+    # Use default field_getter if not provided
+    if field_getter is None:
+        field_getter = _default_field_getter
+
+    # Generate per-field patterns for each row
+    from .candidates import generate_candidates
+
+    field_patterns = {}  # (row_idx, field_name) -> list of patterns
+
+    for row_idx, row in enumerate(include_rows):
+        for field_name in field_names:
+            # Get field value
+            value = field_getter(row, field_name)
+            if not value:
+                continue
+
+            # Generate patterns for this field value
+            # Use a simplified token approach for per-field pattern generation
+            from .tokens import tokenize
+
+            tokens = tokenize(value, splitmethod=options.splitmethod, min_token_len=options.min_token_len)
+
+            patterns = []
+
+            # Exact pattern
+            patterns.append(value.lower())
+
+            # Token-based patterns
+            for token in tokens:
+                # Substring
+                patterns.append(f"*{token.value}*")
+
+            # Prefix
+            if tokens:
+                patterns.append(f"{tokens[0].value}/*")
+
+            # Suffix
+            if tokens:
+                patterns.append(f"*/{tokens[-1].value}")
+
+            # Multi-segment
+            if len(tokens) >= 2:
+                for i in range(len(tokens)):
+                    for j in range(i + 1, min(i + 3, len(tokens))):
+                        segment = [t.value for t in tokens[i:j + 1]]
+                        patterns.append("*" + "*".join(segment) + "*")
+
+            field_patterns[(row_idx, field_name)] = patterns
+
+    # Generate term candidates
+    term_candidates = generate_structured_term_candidates(
         include_rows=include_rows,
         exclude_rows=exclude_rows,
-        field_getter=field_getter or _default_field_getter,
+        field_names=field_names,
+        field_patterns=field_patterns,
+        field_getter=field_getter,
         field_weights=field_weights,
+        max_terms_per_row=50,
     )
-    candidates = _build_candidates(ctx)
-    selection = _greedy_select(ctx, candidates)
-    # For structured solutions, never invert automatically unless requested
-    base_solution = _make_solution(include, exclude, selection, options, inverted=False)
-    payload = base_solution.to_json()
 
-    # Recompute metrics using field-specific matching for structured data
-    atoms = payload.get("atoms", [])
-    if atoms:
-        matched_mask = 0
-        for atom in atoms:
-            pattern = atom.get("text", "")
-            field = atom.get("field")
-            if field:
-                # Field-specific matching
-                for idx, row in enumerate(include_rows):
-                    value = (field_getter or _default_field_getter)(row, field)
-                    if matcher.match_pattern(value, pattern):
-                        matched_mask |= 1 << idx
-            else:
-                # Fallback to canonical string matching
-                for idx, text in enumerate(include):
-                    if matcher.match_pattern(text, pattern):
-                        matched_mask |= 1 << idx
+    # Greedy select terms
+    max_fp = options.budgets.max_fp if options.budgets.max_fp is not None else 0
+    selected_terms = greedy_select_structured_terms(
+        terms=term_candidates,
+        num_include=len(include_rows),
+        num_exclude=len(exclude_rows),
+        max_fp=max_fp,
+    )
 
-        exclude_mask = 0
-        for atom in atoms:
-            pattern = atom.get("text", "")
-            field = atom.get("field")
-            if field:
-                # Field-specific matching
-                for idx, row in enumerate(exclude_rows):
-                    value = (field_getter or _default_field_getter)(row, field)
-                    if matcher.match_pattern(value, pattern):
-                        exclude_mask |= 1 << idx
-            else:
-                # Fallback to canonical string matching
-                for idx, text in enumerate(exclude):
-                    if matcher.match_pattern(text, pattern):
-                        exclude_mask |= 1 << idx
+    # Build solution from selected terms
+    from .models import Atom, Solution
+    from . import bitset
 
-        # Update metrics with correct field-specific counts
-        matched = bitset.count_bits(matched_mask)
-        fp = bitset.count_bits(exclude_mask)
-        fn = len(include_rows) - matched
+    # Convert terms to solution format
+    atoms = []
+    terms_output = []
 
-        payload["metrics"]["covered"] = matched
-        payload["metrics"]["fp"] = fp
-        payload["metrics"]["fn"] = fn
-        payload["metrics"]["total_positive"] = len(include_rows)
+    for term_idx, term in enumerate(selected_terms, 1):
+        # Create term dict
+        term_dict = {
+            "expr": f"T{term_idx}",
+            "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in term.fields.items() if pat != "*"),
+            "fields": {k: v for k, v in term.fields.items() if v != "*"},
+            "tp": bitset.count_bits(term.include_mask),
+            "fp": bitset.count_bits(term.exclude_mask),
+            "fn": len(include_rows) - bitset.count_bits(term.include_mask),
+        }
+        terms_output.append(term_dict)
 
-        # Update witnesses with field-specific examples
-        tp_examples = []
-        fp_examples = []
-        fn_examples = []
-        for idx in range(len(include_rows)):
-            if matched_mask & (1 << idx):
-                tp_examples.append(include[idx])
-                if len(tp_examples) >= 3:
-                    break
-        for idx in range(len(exclude_rows)):
-            if exclude_mask & (1 << idx):
-                fp_examples.append(exclude[idx])
-                if len(fp_examples) >= 3:
-                    break
-        for idx in range(len(include_rows)):
-            if not (matched_mask & (1 << idx)):
-                fn_examples.append(include[idx])
-                if len(fn_examples) >= 3:
-                    break
+        # Create atoms for each field pattern in term
+        for field_name, pattern in term.fields.items():
+            if pattern == "*":
+                continue  # Skip wildcard fields
+            atom = Atom(
+                id=f"T{term_idx}_{field_name}",
+                text=pattern,
+                kind="structured",
+                wildcards=pattern.count("*"),
+                length=len(pattern),
+                field=field_name,
+            )
+            atoms.append(atom)
 
-        payload["witnesses"]["tp_examples"] = tp_examples
-        payload["witnesses"]["fp_examples"] = fp_examples
-        payload["witnesses"]["fn_examples"] = fn_examples
+    # Compute final metrics
+    covered_mask = 0
+    fp_mask = 0
+    for term in selected_terms:
+        covered_mask |= term.include_mask
+        fp_mask |= term.exclude_mask
 
-    # Ensure atoms carry field; if any None slipped through, attribute by substring presence
-    if any(a.get("field") is None for a in atoms):
-        # Build fields list per row for quick lookup
-        def row_fields(row: object) -> dict[str, str]:
-            if isinstance(row, dict):
-                return {k: str(v) for k, v in row.items()}
-            if isinstance(row, (list, tuple)):
-                return {f"f{i}": str(v) for i, v in enumerate(row)}
-            return {"f0": str(row)}
+    metrics = {
+        "covered": bitset.count_bits(covered_mask),
+        "total_positive": len(include_rows),
+        "fp": bitset.count_bits(fp_mask),
+        "fn": len(include_rows) - bitset.count_bits(covered_mask),
+        "atoms": len(atoms),
+        "terms": len(terms_output),
+        "boolean_ops": max(0, len(terms_output) - 1),  # Number of OR operations
+        "wildcards": sum(a.wildcards for a in atoms),
+        "pattern_chars": sum(a.length for a in atoms),
+    }
 
-        rows_fields = [row_fields(r) for r in include_rows]
-        field_names = set(n for rf in rows_fields for n in rf.keys())
-        for atom in atoms:
-            if atom.get("field") is not None:
-                continue
-            text = atom.get("text", "")
-            tokens = [t for t in text.split("*") if t]
-            best_field = None
-            best_score = -1
-            for name in field_names:
-                score = 0
-                for rf in rows_fields:
-                    fv = rf.get(name, "")
-                    for tok in tokens:
-                        if tok and tok in fv:
-                            score += 1
-                if score > best_score:
-                    best_score = score
-                    best_field = name
-            atom["field"] = best_field
-    return payload
+    # Build expression
+    if terms_output:
+        expr_parts = []
+        for term_dict in terms_output:
+            field_parts = [f"({field}: {pat})" for field, pat in term_dict["fields"].items()]
+            expr_parts.append(" & ".join(field_parts))
+        expr_text = " | ".join(f"({part})" for part in expr_parts)
+    else:
+        expr_text = "FALSE"
+
+    # Canonicalize for witnesses
+    def canon(row):
+        if isinstance(row, dict):
+            return "/".join(str(v) for v in row.values() if v)
+        return str(row)
+
+    include_strs = [canon(r) for r in include_rows]
+    exclude_strs = [canon(r) for r in exclude_rows]
+
+    witnesses = {
+        "tp_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
+        "fp_examples": [exclude_strs[i] for i in range(len(exclude_rows)) if (fp_mask >> i) & 1][:3],
+        "fn_examples": [include_strs[i] for i in range(len(include_rows)) if not ((covered_mask >> i) & 1)][:3],
+    }
+
+    return Solution(
+        expr=expr_text,
+        raw_expr=expr_text,
+        global_inverted=False,
+        term_method="structured",
+        mode=options.mode.value,
+        options={
+            "mode": options.mode.value,
+            "splitmethod": options.splitmethod,
+            "min_token_len": options.min_token_len,
+        },
+        atoms=atoms,
+        metrics=metrics,
+        witnesses=witnesses,
+        terms=terms_output,
+    ).to_json()
 
 
 def _eval_atom(pattern: str, dataset: Sequence[str]) -> int:
