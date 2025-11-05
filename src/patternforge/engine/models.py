@@ -44,7 +44,7 @@ class SolveOptions:
     weights: OptimizeWeights = field(default_factory=OptimizeWeights)
     budgets: OptimizeBudgets = field(default_factory=OptimizeBudgets)
     allow_not_on_atoms: bool = True
-    allow_complex_terms: bool = False
+    allow_complex_expressions: bool = False
     min_token_len: int = 3
     per_word_substrings: int = 16
     per_word_multi: int = 4
@@ -60,6 +60,7 @@ class SolveOptions:
             weights=self.weights,
             budgets=self.budgets,
             allow_not_on_atoms=self.allow_not_on_atoms,
+            allow_complex_expressions=self.allow_complex_expressions,
             min_token_len=self.min_token_len,
             per_word_substrings=self.per_word_substrings,
             per_word_multi=self.per_word_multi,
@@ -106,7 +107,7 @@ class Solution:
     atoms: list[Atom]
     metrics: dict[str, int]
     witnesses: dict[str, list[str]]
-    terms: list[dict[str, object]]
+    expressions: list[dict[str, object]]
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -119,5 +120,5 @@ class Solution:
             "atoms": [atom.__dict__ for atom in self.atoms],
             "metrics": self.metrics,
             "witnesses": self.witnesses,
-            "terms": self.terms,
+            "expressions": self.expressions,
         }

@@ -1,18 +1,18 @@
-# Term-Based Structured Solver - Complexity Analysis and Scaling
+# Expression-Based Structured Solver - Complexity Analysis and Scaling
 
 ## Summary
 
-Implemented term-based structured solver that generates conjunctive terms (field patterns combined with AND) and selects them greedily. This addresses the user's requirement for:
-1. **Expressions/Terms**: Each term is a conjunction of field patterns
-2. **Fewer terms**: Greedy selection prefers terms covering multiple rows
+Implemented expression-based structured solver that generates conjunctive expressions (field patterns combined with AND) and selects them greedily. This addresses the user's requirement for:
+1. **Expressions/Terms**: Each expression is a conjunction of field patterns
+2. **Fewer expressions**: Greedy selection prefers expressions covering multiple rows
 3. **Pattern extension**: Scoring encourages hierarchical patterns with more components
-4. **Multi-field specificity**: Encourages adding more fields to terms
+4. **Multi-field specificity**: Encourages adding more fields to expressions
 
 ## What Was Implemented
 
-### Current Implementation (`structured_terms.py`)
+### Current Implementation (`structured_expressions.py`)
 - **Target**: Small to medium datasets (N < 10k rows, F < 10 fields)
-- **Approach**: Row-centric term generation with bounded candidates
+- **Approach**: Row-centric expression generation with bounded candidates
 - **Complexity**: O(N × F² × P + T × N) where T is capped at 1000
 
 ### Algorithm
@@ -21,18 +21,18 @@ Implemented term-based structured solver that generates conjunctive terms (field
    - For each row, generate patterns for each field value
    - P = patterns per value (~10): exact, *token*, prefix/*, */suffix, *tok1*tok2*
 
-2. **Term Candidate Generation** - O(N × C) where C is terms per row (capped at 50)
-   - Single-field terms: field1=pattern1, others=*
-   - Two-field terms: field1=pat1, field2=pat2, others=*
-   - Three-field terms (if F=3): all fields specified
+2. **Term Candidate Generation** - O(N × C) where C is expressions per row (capped at 50)
+   - Single-field expressions: field1=pattern1, others=*
+   - Two-field expressions: field1=pat1, field2=pat2, others=*
+   - Three-field expressions (if F=3): all fields specified
    - **Total candidates**: O(N × C) but capped at max_total_terms=1000
 
 3. **Mask Computation** - O(T × (N + M))
-   - For each term candidate, check which rows it matches
+   - For each expression candidate, check which rows it matches
    - T is bounded (1000), so this is O(1000 × N) = O(N)
 
-4. **Greedy Selection** - O(T × K) where K = selected terms
-   - Each iteration: scan all T terms to find best coverage
+4. **Greedy Selection** - O(T × K) where K = selected expressions
+   - Each iteration: scan all T expressions to find best coverage
    - K iterations (typically < 10)
    - Total: O(1000 × 10) = O(10000) = O(1)
 
@@ -51,13 +51,13 @@ Implemented term-based structured solver that generates conjunctive terms (field
 1. **Term explosion without caps**:
    - Single-field: F × P = 20 × 100 = 2000 patterns
    - Two-field: C(F,2) × P² = 190 × 10000 = 1.9M combinations
-   - Per row: ~2000 terms
-   - Total: 100k × 2000 = 200M terms! ❌
+   - Per row: ~2000 expressions
+   - Total: 100k × 2000 = 200M expressions! ❌
 
 2. **With caps** (current implementation):
-   - Cap at 1000 total terms across all rows
-   - Terms per row: 1000 / 100k = 0.01 ≈ 1 term per 100 rows
-   - This means we'd only generate terms for first ~1000 rows! ❌
+   - Cap at 1000 total expressions across all rows
+   - Terms per row: 1000 / 100k = 0.01 ≈ 1 expression per 100 rows
+   - This means we'd only generate expressions for first ~1000 rows! ❌
 
 3. **Mask computation**:
    - O(1000 × 100k) = 100M operations per field check
@@ -65,7 +65,7 @@ Implemented term-based structured solver that generates conjunctive terms (field
 
 ### Solution: Pattern-Centric Approach (`structured_scalable.py` - WIP)
 
-**Key Insight**: Don't generate terms per row. Instead:
+**Key Insight**: Don't generate expressions per row. Instead:
 
 1. **Generate global patterns per field** - O(N × F × P)
    - Collect all unique patterns across all rows
@@ -77,7 +77,7 @@ Implemented term-based structured solver that generates conjunctive terms (field
    - Store as bitset mask
    - Total: 2000 × 100k = 200M bit operations (manageable)
 
-3. **Greedy set cover with lazy term construction** - O(K × F × P_max)
+3. **Greedy set cover with lazy expression construction** - O(K × F × P_max)
    - Start with single-field patterns
    - Greedily select pattern with best coverage
    - If needed, combine with second field pattern (lazy evaluation)
@@ -91,7 +91,7 @@ Implemented term-based structured solver that generates conjunctive terms (field
 
 ## Multi-Field Term Construction (Advanced)
 
-For better specificity, we want to construct multi-field terms like:
+For better specificity, we want to construct multi-field expressions like:
 ```
 (module: *SRAM*) & (instance: *cpu*) & (pin: *DIN*)
 ```
@@ -103,14 +103,14 @@ Instead of enumerating all F² or F³ combinations upfront:
 1. **Start with single-field patterns**
 2. **When a pattern has false positives**, try adding a second field:
    - For each FP row, find a field pattern that excludes it
-   - Evaluate combined term: (field1: pat1) & (field2: pat2)
+   - Evaluate combined expression: (field1: pat1) & (field2: pat2)
    - If it reduces FP without losing TP, use it
 
 3. **Iteratively refine**:
    - Add third field if still have FP
    - Stop when FP = 0 or can't improve
 
-**Complexity**: O(K × F² × P) where K = number of terms needing refinement
+**Complexity**: O(K × F² × P) where K = number of expressions needing refinement
 - Typically K << N
 - Example: 10 × 400 × 100 = 400k operations
 - Still O(1) since K, F, P are bounded
@@ -121,25 +121,25 @@ Instead of enumerating all F² or F³ combinations upfront:
 |----------|----------|----------|------------|---------------|
 | Row-centric (current) | < 10k | < 10 | O(N) with caps | Good, diverse |
 | Pattern-centric (WIP) | < 100k | < 20 | O(N) | Good, frequency-based |
-| Pattern + lazy (future) | < 100k | < 20 | O(N) | Best, minimal terms |
+| Pattern + lazy (future) | < 100k | < 20 | O(N) | Best, minimal expressions |
 
 ## Implementation Status
 
 ### ✅ Completed
-- Term-based structured solver with conjunctive terms
-- Greedy selection preferring terms covering multiple rows
+- Term-based structured solver with conjunctive expressions
+- Greedy selection preferring expressions covering multiple rows
 - Field weights support
 - Pattern extension scoring (hierarchical paths)
-- Complexity optimizations with bounded term generation
+- Complexity optimizations with bounded expression generation
 - Works well for N < 10k, F < 10
 
 ### 🚧 In Progress
 - Pattern-centric scalable solver (`structured_scalable.py`)
 - Currently implements single-field pattern selection
-- TODO: Multi-field lazy term construction
+- TODO: Multi-field lazy expression construction
 
 ### 📋 Future Work
-- Complete lazy multi-field term construction
+- Complete lazy multi-field expression construction
 - Benchmark with 100k rows
 - Adaptive algorithm selection based on N and F
 - None/NaN wildcard support for "don't care" fields
@@ -147,17 +147,17 @@ Instead of enumerating all F² or F³ combinations upfront:
 ## Recommendations
 
 For current use cases:
-1. **If N < 10k, F < 10**: Use current `structured_terms.py` implementation ✅
+1. **If N < 10k, F < 10**: Use current `structured_expressions.py` implementation ✅
 2. **If N up to 100k, F up to 20**: Complete `structured_scalable.py` implementation
 
 Both achieve O(N) complexity through different means:
-- Current: Cap total terms at constant (1000)
+- Current: Cap total expressions at constant (1000)
 - Scalable: Generate patterns globally, not per-row
 
 ## Testing
 
 Tested with:
-- 3-4 rows, 3 fields: Generates 1-2 terms covering all rows ✅
+- 3-4 rows, 3 fields: Generates 1-2 expressions covering all rows ✅
 - Field weights: Influences pattern selection ✅
 - Hierarchical paths: Finds `*core*` to distinguish CPU from GPU ✅
 - All existing tests pass ✅

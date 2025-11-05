@@ -21,11 +21,11 @@ def explain_dict(
         matched = matched_expr
         fp = fp_expr
         fn = fn_expr
-    # Build per-term details (top-level OR terms; currently atoms are terms)
-    terms: list[dict[str, object]] = []
+    # Build per-term details (top-level OR expressions; currently atoms are expressions)
+    expressions: list[dict[str, object]] = []
     for atom in atoms:
         # summarize per-term using existing per-atom counts
-        terms.append(
+        expressions.append(
             {
                 "expr": atom.id,
                 "raw_expr": atom.text,
@@ -47,7 +47,7 @@ def explain_dict(
         },
         "atoms": [],
         "witnesses": solution.get("witnesses", {}),
-        "terms": solution.get("terms", terms),
+        "expressions": solution.get("expressions", expressions),
     }
     for atom in atoms:
         entry = {
@@ -164,11 +164,11 @@ def summarize_text(solution: dict[str, object]) -> str:
 def explain_simple(
     solution: dict[str, object], include, exclude
 ) -> str:
-    terms = solution.get("terms", []) or []
+    expressions = solution.get("expressions", []) or []
     # Determine if structured by presence of non-empty 'fields'
-    structured = any(bool(t.get("fields")) for t in terms)
+    structured = any(bool(t.get("fields")) for t in expressions)
     # Sort descending by residual contribution first
-    terms_sorted = sorted(terms, key=lambda t: t.get("incremental_tp", 0), reverse=True)
+    terms_sorted = sorted(expressions, key=lambda t: t.get("incremental_tp", 0), reverse=True)
     # Label depends on term method: additive -> matches, subtractive -> removed
     term_method = solution.get("term_method", "additive")
     label = "removed" if term_method == "subtractive" else "matches"

@@ -357,7 +357,7 @@ def _make_solution(
         masks_ex.append(mask_ex)
     # When allowed, try to pair atoms into conjunction terms that retain TP and reduce FP
     used = [False] * len(atoms)
-    if options.allow_complex_terms:
+    if options.allow_complex_expressions:
         for i, atom in enumerate(atoms):
             if used[i]:
                 continue
@@ -433,7 +433,7 @@ def _make_solution(
                     }
                 )
             else:
-                # fallback single term
+                # fallback single expression
                 used[i] = True
                 in_m = masks_in[i]
                 ex_m = masks_ex[i]
@@ -473,23 +473,23 @@ def _make_solution(
                     "_mask_ex": ex_m,
                 }
             )
-        # end base-term assembly
+        # end base-expression assembly
 
     # Residual coverage based on greedy order of atoms
     acc_in = 0
     acc_ex = 0
-    for term in terms:
-        term_in = term.pop("_mask_in", 0)
-        term_ex = term.pop("_mask_ex", 0)
+    for expression in terms:
+        term_in = expression.pop("_mask_in", 0)
+        term_ex = expression.pop("_mask_ex", 0)
         new_in = term_in & (~acc_in)
         new_ex = term_ex & (~acc_ex)
-        term["incremental_tp"] = bitset.count_bits(new_in)
-        term["incremental_fp"] = bitset.count_bits(new_ex)
+        expression["incremental_tp"] = bitset.count_bits(new_in)
+        expression["incremental_fp"] = bitset.count_bits(new_ex)
         acc_in |= term_in
         acc_ex |= term_ex
 
     # Enrich with simple token-based conjunction suggestions if enabled and none created
-    if options.allow_complex_terms:
+    if options.allow_complex_expressions:
         import re
 
         def simple_tokens(s: str) -> list[str]:
@@ -573,16 +573,16 @@ def _make_solution(
                 if added >= 2:
                     break
 
-    # Promote terms' field maps into final expression (OR of per-term conjunctions)
-    def term_to_text(term: dict[str, object]) -> str:
-        fields = term.get("fields") or {}
+    # Promote terms' field maps into final expression (OR of per-expression conjunctions)
+    def term_to_text(expression: dict[str, object]) -> str:
+        fields = expression.get("fields") or {}
         if isinstance(fields, dict) and fields:
             parts = []
             for _, pat in fields.items():
                 parts.append(f"({pat})")
             return " & ".join(parts)
         # fallback to raw_expr
-        return str(term.get("raw_expr", "FALSE"))
+        return str(expression.get("raw_expr", "FALSE"))
     expr_text = " | ".join(term_to_text(t) for t in terms) if terms else "FALSE"
 
     return Solution(
@@ -599,7 +599,7 @@ def _make_solution(
         atoms=atoms,
         metrics=metrics,
         witnesses=witnesses,
-        terms=terms,
+        expressions=terms,
     )
 
 
@@ -626,7 +626,7 @@ def propose_solution(
                 max_fn=options.budgets.max_fn,
             ),
             allow_not_on_atoms=options.allow_not_on_atoms,
-            allow_complex_terms=options.allow_complex_terms,
+            allow_complex_expressions=options.allow_complex_expressions,
             min_token_len=options.min_token_len,
             per_word_substrings=options.per_word_substrings,
             per_word_multi=options.per_word_multi,
@@ -840,9 +840,9 @@ def _propose_solution_structured_impl(
     - field_getter: optional function(row, field_name) -> str
     - field_weights: optional dict mapping field names to weights (higher = prefer patterns on this field)
     """
-    from .structured_terms import (
-        generate_structured_term_candidates,
-        greedy_select_structured_terms,
+    from .structured_expressions import (
+        generate_structured_expression_candidates,
+        greedy_select_structured_expressions,
     )
 
     # Determine field names
@@ -901,8 +901,8 @@ def _propose_solution_structured_impl(
 
             field_patterns[(row_idx, field_name)] = patterns
 
-    # Generate term candidates
-    term_candidates = generate_structured_term_candidates(
+    # Generate expression candidates
+    expression_candidates = generate_structured_expression_candidates(
         include_rows=include_rows,
         exclude_rows=exclude_rows,
         field_names=field_names,
@@ -914,8 +914,8 @@ def _propose_solution_structured_impl(
 
     # Greedy select terms
     max_fp = options.budgets.max_fp if options.budgets.max_fp is not None else 0
-    selected_terms = greedy_select_structured_terms(
-        terms=term_candidates,
+    selected_expressions = greedy_select_structured_expressions(
+        expressions=expression_candidates,
         num_include=len(include_rows),
         num_exclude=len(exclude_rows),
         max_fp=max_fp,
@@ -927,26 +927,26 @@ def _propose_solution_structured_impl(
 
     # Convert terms to solution format
     atoms = []
-    terms_output = []
+    expressions_output = []
 
-    for term_idx, term in enumerate(selected_terms, 1):
-        # Create term dict
+    for expression_idx, expression in enumerate(selected_expressions, 1):
+        # Create expression dict
         term_dict = {
-            "expr": f"T{term_idx}",
-            "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in term.fields.items() if pat != "*"),
-            "fields": {k: v for k, v in term.fields.items() if v != "*"},
-            "tp": bitset.count_bits(term.include_mask),
-            "fp": bitset.count_bits(term.exclude_mask),
-            "fn": len(include_rows) - bitset.count_bits(term.include_mask),
+            "expr": f"T{expression_idx}",
+            "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in expression.fields.items() if pat != "*"),
+            "fields": {k: v for k, v in expression.fields.items() if v != "*"},
+            "tp": bitset.count_bits(expression.include_mask),
+            "fp": bitset.count_bits(expression.exclude_mask),
+            "fn": len(include_rows) - bitset.count_bits(expression.include_mask),
         }
-        terms_output.append(term_dict)
+        expressions_output.append(term_dict)
 
-        # Create atoms for each field pattern in term
-        for field_name, pattern in term.fields.items():
+        # Create atoms for each field pattern in expression
+        for field_name, pattern in expression.fields.items():
             if pattern == "*":
                 continue  # Skip wildcard fields
             atom = Atom(
-                id=f"T{term_idx}_{field_name}",
+                id=f"T{expression_idx}_{field_name}",
                 text=pattern,
                 kind="structured",
                 wildcards=pattern.count("*"),
@@ -958,9 +958,9 @@ def _propose_solution_structured_impl(
     # Compute final metrics
     covered_mask = 0
     fp_mask = 0
-    for term in selected_terms:
-        covered_mask |= term.include_mask
-        fp_mask |= term.exclude_mask
+    for expression in selected_expressions:
+        covered_mask |= expression.include_mask
+        fp_mask |= expression.exclude_mask
 
     metrics = {
         "covered": bitset.count_bits(covered_mask),
@@ -968,16 +968,16 @@ def _propose_solution_structured_impl(
         "fp": bitset.count_bits(fp_mask),
         "fn": len(include_rows) - bitset.count_bits(covered_mask),
         "atoms": len(atoms),
-        "terms": len(terms_output),
-        "boolean_ops": max(0, len(terms_output) - 1),  # Number of OR operations
+        "terms": len(expressions_output),
+        "boolean_ops": max(0, len(expressions_output) - 1),  # Number of OR operations
         "wildcards": sum(a.wildcards for a in atoms),
         "pattern_chars": sum(a.length for a in atoms),
     }
 
     # Build expression
-    if terms_output:
+    if expressions_output:
         expr_parts = []
-        for term_dict in terms_output:
+        for term_dict in expressions_output:
             field_parts = [f"({field}: {pat})" for field, pat in term_dict["fields"].items()]
             expr_parts.append(" & ".join(field_parts))
         expr_text = " | ".join(f"({part})" for part in expr_parts)
@@ -1013,7 +1013,7 @@ def _propose_solution_structured_impl(
         atoms=atoms,
         metrics=metrics,
         witnesses=witnesses,
-        terms=terms_output,
+        expressions=expressions_output,
     ).to_json()
 
 
