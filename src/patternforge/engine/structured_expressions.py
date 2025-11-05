@@ -21,12 +21,34 @@ class StructuredExpression:
         self.exclude_mask = 0
         self.score = 0.0
 
-    def matches_row(self, row: dict[str, str], field_getter: Callable) -> bool:
-        """Check if this expression matches a row."""
+    def matches_row(self, row: dict[str, str], field_getter: Callable, allow_none_wildcard: bool = True) -> bool:
+        """Check if this expression matches a row.
+
+        Args:
+            row: Row to match against
+            field_getter: Function to extract field value
+            allow_none_wildcard: If True, None/NaN field values are treated as wildcards (always match)
+        """
         for field_name, pattern in self.fields.items():
             if pattern == "*":
                 continue  # Wildcard field - always matches
+
+            # Get field value
             value = field_getter(row, field_name)
+
+            # Check for None/NaN wildcard (for exclude_rows)
+            if allow_none_wildcard:
+                if value is None:
+                    continue  # None means "don't care" - always matches
+                # Check for NaN (for pandas/numpy compatibility)
+                try:
+                    import math
+                    if isinstance(value, float) and math.isnan(value):
+                        continue  # NaN means "don't care" - always matches
+                except:
+                    pass
+
+            # Match pattern against value
             if not matcher.match_pattern(value, pattern):
                 return False
         return True
@@ -35,15 +57,23 @@ class StructuredExpression:
         self,
         include_rows: Sequence[dict],
         exclude_rows: Sequence[dict],
-        field_getter: Callable
+        field_getter: Callable,
+        allow_none_wildcard_in_excludes: bool = True,
     ):
-        """Compute include/exclude masks for this expression."""
+        """Compute include/exclude masks for this expression.
+
+        Args:
+            include_rows: Rows that should match
+            exclude_rows: Rows that should NOT match
+            field_getter: Function to extract field values
+            allow_none_wildcard_in_excludes: If True, None/NaN in exclude rows means "don't care"
+        """
         for idx, row in enumerate(include_rows):
-            if self.matches_row(row, field_getter):
+            if self.matches_row(row, field_getter, allow_none_wildcard=False):
                 self.include_mask |= (1 << idx)
 
         for idx, row in enumerate(exclude_rows):
-            if self.matches_row(row, field_getter):
+            if self.matches_row(row, field_getter, allow_none_wildcard=allow_none_wildcard_in_excludes):
                 self.exclude_mask |= (1 << idx)
 
     def compute_score(self, field_weights: dict[str, float] | None = None):
