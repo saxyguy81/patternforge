@@ -786,6 +786,10 @@ def propose_solution(
         return base_solution
     if options.invert == InvertStrategy.ALWAYS or not base_solution.patterns:
         inverted_solution = _make_solution(include, exclude, selection, options, inverted=True)
+        # In EXACT mode (or when max_fp is set), verify inverted solution doesn't violate FP constraint
+        if options.budgets.max_fp is not None and inverted_solution.metrics['fp'] > options.budgets.max_fp:
+            # Inverted solution violates FP constraint - return base solution instead
+            return base_solution
         return inverted_solution
     inverted_solution = _make_solution(include, exclude, selection, options, inverted=True)
     weights = _resolve_weights(options)
@@ -799,6 +803,10 @@ def propose_solution(
     )
     inverted_cost = _cost(inverted_selection, len(include), weights)
     if options.invert == InvertStrategy.ALWAYS or inverted_cost < base_cost:
+        # In EXACT mode (or when max_fp is set), verify inverted solution doesn't violate FP constraint
+        if options.budgets.max_fp is not None and inverted_solution.metrics['fp'] > options.budgets.max_fp:
+            # Inverted solution violates FP constraint - return base solution instead
+            return base_solution
         return inverted_solution
     return base_solution
 

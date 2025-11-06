@@ -35,9 +35,11 @@ def test_propose_solution_generates_atoms() -> None:
 def test_propose_solution_inversion() -> None:
     include = ["one"]
     exclude = ["one", "two", "three"]
-    # Create options dict with invert="always"
+    # Create options dict with invert="always" and mode="APPROX"
+    # (APPROX mode needed because inverted solution would have FP in EXACT mode)
     options = DEFAULT_TEST_OPTIONS.copy()
     options['invert'] = 'always'
+    options['mode'] = 'APPROX'  # Allow FP for inversion test
     solution = propose_solution(include, list(exclude), **options)
     assert solution.global_inverted is True
 

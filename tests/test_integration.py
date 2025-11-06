@@ -83,7 +83,7 @@ class TestPatternforgeIntegration(unittest.TestCase):
 
         # Use patternforge with exclude list
         solution = propose_solution(
-            instance_list, exclude_words, splitmethod="char"
+            instance_list, exclude_words, mode="APPROX", splitmethod="char"
         )
 
         # Extract patterns from solution
@@ -129,7 +129,7 @@ class TestPatternforgeIntegration(unittest.TestCase):
 
         # Use patternforge with exclude list (only showing first 10 instances for brevity)
         solution = propose_solution(
-            instance_list, exclude_words, splitmethod="char"
+            instance_list, exclude_words, mode="APPROX", splitmethod="char"
         )
 
         # Extract patterns from solution

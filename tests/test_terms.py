@@ -50,6 +50,7 @@ def test_terms_flag_inverted_subtractive() -> None:
     exclude = ["a/y", "b/z"]
     opts = DEFAULT_OPTIONS.copy()
     opts["invert"] = "always"  # Override default
+    opts["mode"] = "APPROX"  # Allow FP for inversion test
     sol = propose_solution(include, exclude, **opts)
     assert sol.term_method == "subtractive"
 
