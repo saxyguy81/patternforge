@@ -35,7 +35,7 @@ def test_conjunction_term_present_and_reduces_fp() -> None:
     # Find that conjunction and assert it has lower fp than components would individually
     conj = next(t for t in expressions if "&" in t.get("expr", "") or "&" in t.get("raw_expr", ""))
     assert conj["fp"] == 0
-    assert conj["tp"] == 2
+    assert conj["matches"] == 2
 
 
 def test_and_not_term_present_and_reduces_fp() -> None:
@@ -52,4 +52,4 @@ def test_and_not_term_present_and_reduces_fp() -> None:
     assert any("-" in t.get("expr", "") or "-" in t.get("raw_expr", "") for t in expressions)
     minus = next(t for t in expressions if "-" in t.get("expr", "") or "-" in t.get("raw_expr", ""))
     assert minus["fp"] == 0
-    assert minus["tp"] == 2
+    assert minus["matches"] == 2

@@ -31,7 +31,7 @@ def test_terms_residual_sums_to_covered() -> None:
     sol = propose_solution(include, exclude, **DEFAULT_OPTIONS)
     assert sol.expressions and isinstance(sol.expressions, list)
     covered = sol.metrics["covered"]
-    residual_sum = sum(t.get("incremental_tp", 0) for t in sol.expressions)
+    residual_sum = sum(t.get("incremental_matches", 0) for t in sol.expressions)
     assert residual_sum == covered
 
 
@@ -41,7 +41,7 @@ def test_terms_fields_present_and_flag() -> None:
     sol = propose_solution(include, exclude, **DEFAULT_OPTIONS)
     assert sol.term_method == "additive"
     term = sol.expressions[0]
-    for key in ("expr", "raw_expr", "tp", "fp", "fn", "incremental_tp", "incremental_fp", "length"):
+    for key in ("expr", "raw_expr", "matches", "fp", "fn", "incremental_matches", "incremental_fp", "length"):
         assert key in term
 
 
@@ -64,4 +64,4 @@ def test_terms_with_allow_complex_terms_flag() -> None:
     # Complex terms may or may not form conjunctions; ensure schema remains stable
     assert isinstance(sol.expressions, list)
     for t in sol.expressions:
-        assert set(["expr", "raw_expr", "tp", "fp", "fn", "incremental_tp", "incremental_fp", "length"]).issubset(t.keys())
+        assert set(["expr", "raw_expr", "matches", "fp", "fn", "incremental_matches", "incremental_fp", "length"]).issubset(t.keys())

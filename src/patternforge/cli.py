@@ -218,10 +218,10 @@ def _command_propose(args: argparse.Namespace) -> None:
         payload = [
             {
                 "fields": t.get("fields", {}),
-                "tp": t.get("tp", 0),
+                "matches": t.get("matches", 0),
                 "fp": t.get("fp", 0),
                 "fn": t.get("fn", 0),
-                "incremental_tp": t.get("incremental_tp", 0),
+                "incremental_matches": t.get("incremental_matches", 0),
                 "incremental_fp": t.get("incremental_fp", 0),
                 "length": t.get("length", 0),
             }

@@ -16,7 +16,7 @@ def sample_solution() -> dict:
                 "kind": "substring",
                 "wildcards": 2,
                 "length": 5,
-                "tp": 2,
+                "matches": 2,
                 "fp": 1,
             }
         ],
@@ -32,7 +32,7 @@ def test_explain_dict() -> None:
     sol = sample_solution()
     payload = explain_dict(sol, ["alpha/module1", "alpha/module2"], ["beta/module1"])
     assert payload["metrics"]["covered"] == 2
-    assert payload["patterns"][0]["tp"] == 2
+    assert payload["patterns"][0]["matches"] == 2
 
 
 def test_explain_text() -> None:

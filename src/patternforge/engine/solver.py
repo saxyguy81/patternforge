@@ -256,7 +256,7 @@ def _evaluate_patterns(
         include_mask |= mask_in
         exclude_mask |= mask_ex
         per_pattern[pattern.id] = {
-            "tp": bitset.count_bits(mask_in),
+            "matches": bitset.count_bits(mask_in),
             "fp": bitset.count_bits(mask_ex),
         }
     matched = bitset.count_bits(include_mask)
@@ -276,7 +276,7 @@ def _make_solution(
     matched_expr, fp_expr, fn_expr, per_pattern = _evaluate_patterns(base_patterns, include, exclude)
     patterns: list[Pattern] = []
     for pattern in base_patterns:
-        stats = per_pattern.get(pattern.id, {"tp": 0, "fp": 0})
+        stats = per_pattern.get(pattern.id, {"matches": 0, "fp": 0})
         patterns.append(
             Pattern(
                 id=pattern.id,
@@ -285,7 +285,7 @@ def _make_solution(
                 wildcards=pattern.wildcards,
                 length=pattern.length,
                 negated=pattern.negated,
-                matches=stats["tp"],
+                matches=stats["matches"],
                 fp=stats["fp"],
             )
         )
@@ -317,7 +317,7 @@ def _make_solution(
 
         parts = [p for p in pattern.split("&")]
         return all(_match_piece(p) for p in parts)
-    witnesses = {"tp_examples": [], "fp_examples": [], "fn_examples": []}
+    witnesses = {"matches_examples": [], "fp_examples": [], "fn_examples": []}
     dataset_pos = include
     dataset_neg = exclude
     mask_pos = 0
@@ -332,8 +332,8 @@ def _make_solution(
     for idx, text in enumerate(dataset_pos):
         covered = bool(mask_pos & (1 << idx))
         if (not inverted and covered) or (inverted and not covered):
-            witnesses["tp_examples"].append(text)
-            if len(witnesses["tp_examples"]) >= 3:
+            witnesses["matches_examples"].append(text)
+            if len(witnesses["matches_examples"]) >= 3:
                 break
     for idx, text in enumerate(dataset_neg):
         covered = bool(mask_neg & (1 << idx))
@@ -416,7 +416,7 @@ def _make_solution(
                         "raw_expr": f"({a.text}) & ({b.text})",
                         "field": a.field or b.field,
                         "fields": {k: v for k, v in ((a.field, a.text), (b.field, b.text)) if k},
-                        "tp": bitset.count_bits(best_in),
+                        "matches": bitset.count_bits(best_in),
                         "fp": bitset.count_bits(best_ex),
                         "fn": len(include) - bitset.count_bits(best_in),
                         "length": a.length + b.length,
@@ -440,7 +440,7 @@ def _make_solution(
                         "field": a.field,
                         "fields": fields_map,
                         "not_fields": not_fields,
-                        "tp": bitset.count_bits(best_neg_in),
+                        "matches": bitset.count_bits(best_neg_in),
                         "fp": bitset.count_bits(best_neg_ex),
                         "fn": len(include) - bitset.count_bits(best_neg_in),
                         "length": a.length + b.length,
@@ -461,7 +461,7 @@ def _make_solution(
                         "raw_expr": pattern.text,
                         "field": pattern.field,
                         "fields": ({pattern.field: pattern.text} if pattern.field else {}),
-                        "tp": bitset.count_bits(in_m),
+                        "matches": bitset.count_bits(in_m),
                         "fp": bitset.count_bits(ex_m),
                         "fn": len(include) - bitset.count_bits(in_m),
                         "length": pattern.length,
@@ -481,7 +481,7 @@ def _make_solution(
                     "raw_expr": pattern.text,
                     "field": pattern.field,
                     "fields": ({pattern.field: pattern.text} if pattern.field else {}),
-                    "tp": bitset.count_bits(in_m),
+                    "matches": bitset.count_bits(in_m),
                     "fp": bitset.count_bits(ex_m),
                     "fn": len(include) - bitset.count_bits(in_m),
                     "length": pattern.length,
@@ -501,7 +501,7 @@ def _make_solution(
         term_ex = expression.pop("_mask_ex", 0)
         new_in = term_in & (~acc_in)
         new_ex = term_ex & (~acc_ex)
-        expression["incremental_tp"] = bitset.count_bits(new_in)
+        expression["incremental_matches"] = bitset.count_bits(new_in)
         expression["incremental_fp"] = bitset.count_bits(new_ex)
         acc_in |= term_in
         acc_ex |= term_ex
@@ -546,13 +546,13 @@ def _make_solution(
                         {
                             "expr": raw,
                             "raw_expr": raw,
-                            "tp": bitset.count_bits(inter_in),
+                            "matches": bitset.count_bits(inter_in),
                             "fp": bitset.count_bits(inter_ex),
                             "fn": len(include) - bitset.count_bits(inter_in),
                             "length": len(t1) + len(t2),
                             "include_examples": [include[k] for k in range(len(include)) if (inter_in >> k) & 1][:3],
                             "exclude_examples": [exclude[k] for k in range(len(exclude)) if (inter_ex >> k) & 1][:3],
-                            "incremental_tp": 0,
+                            "incremental_matches": 0,
                             "incremental_fp": 0,
                         }
                     )
@@ -575,13 +575,13 @@ def _make_solution(
                             {
                                 "expr": raw,
                                 "raw_expr": raw,
-                                "tp": bitset.count_bits(diff_in),
+                                "matches": bitset.count_bits(diff_in),
                                 "fp": bitset.count_bits(diff_ex),
                                 "fn": len(include) - bitset.count_bits(diff_in),
                                 "length": len(t1) + len(t2),
                                 "include_examples": [include[k] for k in range(len(include)) if (diff_in >> k) & 1][:3],
                                 "exclude_examples": [exclude[k] for k in range(len(exclude)) if (diff_ex >> k) & 1][:3],
-                                "incremental_tp": 0,
+                                "incremental_matches": 0,
                                 "incremental_fp": 0,
                             }
                         )
@@ -1044,15 +1044,15 @@ def _propose_solution_structured_scalable(
 
     # Build solution
     patterns = []
-    expressions_output = []
+    expressions_oumatchesut = []
 
     for expr_idx, expr_dict in enumerate(selected_expressions, 1):
         fields_dict = expr_dict["fields"]
-        expressions_output.append({
+        expressions_oumatchesut.append({
             "expr": f"E{expr_idx}",
             "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in fields_dict.items()),
             "fields": fields_dict,
-            "tp": bitset.count_bits(expr_dict["include_mask"]),
+            "matches": bitset.count_bits(expr_dict["include_mask"]),
             "fp": bitset.count_bits(expr_dict["exclude_mask"]),
             "fn": len(include_rows) - bitset.count_bits(expr_dict["include_mask"]),
         })
@@ -1081,16 +1081,16 @@ def _propose_solution_structured_scalable(
         "fp": bitset.count_bits(fp_mask),
         "fn": len(include_rows) - bitset.count_bits(covered_mask),
         "patterns": len(patterns),
-        "expressions": len(expressions_output),
-        "boolean_ops": max(0, len(expressions_output) - 1),
+        "expressions": len(expressions_oumatchesut),
+        "boolean_ops": max(0, len(expressions_oumatchesut) - 1),
         "wildcards": sum(a.wildcards for a in patterns),
         "pattern_chars": sum(a.length for a in patterns),
     }
 
     # Build expression string
-    if expressions_output:
+    if expressions_oumatchesut:
         expr_parts = []
-        for expr_dict in expressions_output:
+        for expr_dict in expressions_oumatchesut:
             field_parts = [f"({field}: {pat})" for field, pat in expr_dict["fields"].items()]
             expr_parts.append(" & ".join(field_parts))
         expr_text = " | ".join(f"({part})" for part in expr_parts)
@@ -1107,7 +1107,7 @@ def _propose_solution_structured_scalable(
     exclude_strs = [canon(r) for r in exclude_rows]
 
     witnesses = {
-        "tp_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
+        "matches_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
         "fp_examples": [exclude_strs[i] for i in range(len(exclude_rows)) if (fp_mask >> i) & 1][:3],
         "fn_examples": [include_strs[i] for i in range(len(include_rows)) if not ((covered_mask >> i) & 1)][:3],
     }
@@ -1126,7 +1126,7 @@ def _propose_solution_structured_scalable(
         patterns=patterns,
         metrics=metrics,
         witnesses=witnesses,
-        expressions=expressions_output,
+        expressions=expressions_oumatchesut,
     )
 
 
@@ -1232,7 +1232,7 @@ def _propose_solution_structured_bounded(
 
     # Convert terms to solution format
     patterns = []
-    expressions_output = []
+    expressions_oumatchesut = []
 
     for expression_idx, expression in enumerate(selected_expressions, 1):
         # Create expression dict
@@ -1240,11 +1240,11 @@ def _propose_solution_structured_bounded(
             "expr": f"T{expression_idx}",
             "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in expression.fields.items() if pat != "*"),
             "fields": {k: v for k, v in expression.fields.items() if v != "*"},
-            "tp": bitset.count_bits(expression.include_mask),
+            "matches": bitset.count_bits(expression.include_mask),
             "fp": bitset.count_bits(expression.exclude_mask),
             "fn": len(include_rows) - bitset.count_bits(expression.include_mask),
         }
-        expressions_output.append(term_dict)
+        expressions_oumatchesut.append(term_dict)
 
         # Create patterns for each field pattern in expression
         for field_name, pattern in expression.fields.items():
@@ -1273,16 +1273,16 @@ def _propose_solution_structured_bounded(
         "fp": bitset.count_bits(fp_mask),
         "fn": len(include_rows) - bitset.count_bits(covered_mask),
         "patterns": len(patterns),
-        "terms": len(expressions_output),
-        "boolean_ops": max(0, len(expressions_output) - 1),  # Number of OR operations
+        "terms": len(expressions_oumatchesut),
+        "boolean_ops": max(0, len(expressions_oumatchesut) - 1),  # Number of OR operations
         "wildcards": sum(a.wildcards for a in patterns),
         "pattern_chars": sum(a.length for a in patterns),
     }
 
     # Build expression
-    if expressions_output:
+    if expressions_oumatchesut:
         expr_parts = []
-        for term_dict in expressions_output:
+        for term_dict in expressions_oumatchesut:
             field_parts = [f"({field}: {pat})" for field, pat in term_dict["fields"].items()]
             expr_parts.append(" & ".join(field_parts))
         expr_text = " | ".join(f"({part})" for part in expr_parts)
@@ -1299,7 +1299,7 @@ def _propose_solution_structured_bounded(
     exclude_strs = [canon(r) for r in exclude_rows]
 
     witnesses = {
-        "tp_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
+        "matches_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
         "fp_examples": [exclude_strs[i] for i in range(len(exclude_rows)) if (fp_mask >> i) & 1][:3],
         "fn_examples": [include_strs[i] for i in range(len(include_rows)) if not ((covered_mask >> i) & 1)][:3],
     }
@@ -1318,7 +1318,7 @@ def _propose_solution_structured_bounded(
         patterns=patterns,
         metrics=metrics,
         witnesses=witnesses,
-        expressions=expressions_output,
+        expressions=expressions_oumatchesut,
     )
 
 

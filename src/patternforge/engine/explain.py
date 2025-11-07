@@ -49,7 +49,7 @@ def explain_dict(
                 "expr": pattern.id,
                 "raw_expr": pattern.text,
                 "field": pattern.field,
-                "tp": per_pattern[pattern.id]["tp"],
+                "matches": per_pattern[pattern.id]["matches"],
                 "fp": per_pattern[pattern.id]["fp"],
             }
         )
@@ -83,7 +83,7 @@ def explain_dict(
             "kind": pattern.kind,
             "wildcards": pattern.wildcards,
             "length": pattern.length,
-            "tp": per_pattern[pattern.id]["tp"],
+            "matches": per_pattern[pattern.id]["matches"],
             "fp": per_pattern[pattern.id]["fp"],
         }
         payload["patterns"].append(entry)
@@ -125,12 +125,12 @@ def explain_text(
         else:
             lines.append(f"  {pattern['id']}: {pattern['text']} ({pattern.get('kind','unknown')})")
     if fp or fn:
-        tp_examples = ", ".join(witnesses.get("tp_examples", [])[:3])
+        matches_examples = ", ".join(witnesses.get("matches_examples", [])[:3])
         fp_examples = ", ".join(witnesses.get("fp_examples", [])[:3])
         fn_examples = ", ".join(witnesses.get("fn_examples", [])[:3])
         lines.append("EXAMPLES:")
-        if tp_examples:
-            lines.append(f"  TP: {tp_examples}")
+        if matches_examples:
+            lines.append(f"  TP: {matches_examples}")
         if fp_examples:
             lines.append(f"  FP: {fp_examples}")
         if fn_examples:
@@ -196,7 +196,7 @@ def summarize_text(solution: dict[str, object]) -> str:
     return (
         "The selection covers "
         f"{covered} of {total} target items (FN={fn}) with {fp} false positives. "
-        f"Primary coverage comes from {primary['text']} with {primary.get('tp','?')} matches. "
+        f"Primary coverage comes from {primary['text']} with {primary.get('matches','?')} matches. "
         f"In total the formula uses {len(patterns)} patterns."
     )
 
@@ -215,7 +215,7 @@ def explain_simple(
     # Determine if structured by presence of non-empty 'fields'
     structured = any(bool(t.get("fields")) for t in expressions)
     # Sort descending by residual contribution first
-    terms_sorted = sorted(expressions, key=lambda t: t.get("incremental_tp", 0), reverse=True)
+    terms_sorted = sorted(expressions, key=lambda t: t.get("incremental_matches", 0), reverse=True)
     # Label depends on term method: additive -> matches, subtractive -> removed
     label = "removed" if term_method == "subtractive" else "matches"
     lines: list[str] = []
@@ -244,14 +244,14 @@ def explain_simple(
                 npat = not_fields.get(k)
                 if npat and npat != "*":
                     parts.append(f"- {k}: {npat}")
-            tp = t.get("tp", 0)
-            rtp = t.get("incremental_tp", 0)
+            matches = t.get("matches", 0)
+            rmatches = t.get("incremental_matches", 0)
             text = " ".join(parts) if parts else str(t.get("raw_expr", "*"))
-            lines.append(f"{text}  (# incremental {label}: {rtp}, total {label}: {tp})")
+            lines.append(f"{text}  (# incremental {label}: {rmatches}, total {label}: {matches})")
     else:
         for t in terms_sorted:
             raw = str(t.get("raw_expr", t.get("expr", "*")))
-            tp = t.get("tp", 0)
-            rtp = t.get("incremental_tp", 0)
-            lines.append(f"{raw}  (# incremental {label}: {rtp}, total {label}: {tp})")
+            matches = t.get("matches", 0)
+            rmatches = t.get("incremental_matches", 0)
+            lines.append(f"{raw}  (# incremental {label}: {rmatches}, total {label}: {matches})")
     return "\n".join(lines)
