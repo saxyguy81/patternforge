@@ -1,31 +1,3 @@
-# Claude Code Development Notes
-
-## Testing
-
-### Use `pytestl` for Local Testing (Shell Alias)
-
-**NOTE**: This repository uses a job queue system for `pytest`. Each `pytest` invocation submits a job to a queue, which adds **1-2 minutes latency** per test run.
-
-Use the shell alias `pytestl` for local testing (if configured in your environment):
-
-```bash
-# ❌ SLOW - submits to queue (1-2 min latency)
-pytest tests/
-
-# ✅ FAST - runs locally immediately (shell alias, if configured)
-pytestl tests/
-```
-
-**`pytestl` is a shell alias**, not a standalone executable. Configure it in your shell:
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-alias pytestl='python3 -m pytest'
-```
-
-**When to use each:**
-- **`pytestl`**: During active development, debugging, quick iterations (local execution)
-- **`pytest`**: For final validation, CI/CD (uses queue resources)
-
 ### Quick Test Commands
 
 ```bash
