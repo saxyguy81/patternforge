@@ -34,8 +34,10 @@ class OptimizeWeights:
         - Can be scalar (global) or dict (per-field)
         - Example: w_fp={"module": 10.0, "pin": 1.0} means FPs on module hurt 10x more
 
-    w_pattern, w_op, w_wc, w_len: Complexity penalties
+    w_pattern, w_op, w_wc, w_len: Pattern complexity/specificity weights
         - Applied during greedy selection
+        - w_pattern, w_op, w_wc are penalties (positive = worse)
+        - w_len is a reward (negative = better, rewards longer/more specific patterns)
         - Can be scalar (global) or dict (per-field)
     """
     w_field: dict[str, float] | None = None
@@ -43,8 +45,8 @@ class OptimizeWeights:
     w_fn: float | dict[str, float] = 1.0
     w_pattern: float | dict[str, float] = 0.05
     w_op: float | dict[str, float] = 0.02
-    w_wc: float | dict[str, float] = 0.01
-    w_len: float | dict[str, float] = 0.001
+    w_wc: float | dict[str, float] = 0.005
+    w_len: float | dict[str, float] = -0.01
 
 
 @dataclass(frozen=True)

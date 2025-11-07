@@ -34,8 +34,8 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "w_fn": 1.0,
     "w_pattern": 0.05,
     "w_op": 0.02,
-    "w_wc": 0.01,
-    "w_len": -0.003,  # Negative to reward longer, more specific patterns
+    "w_wc": 0.005,  # Reduced from 0.01 to be less punishing on multi-wildcard patterns
+    "w_len": -0.01,  # Increased from -0.003 to reward specificity (non-wildcard chars)
 }
 
 
