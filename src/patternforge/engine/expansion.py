@@ -58,7 +58,8 @@ def _try_extend_multi_wildcard(pattern: str, include: list[str], exclude: list[s
                         if next_token_pos >= 0:
                             # Check what's between them
                             between = match_text[last_segment_pos + len(last_segment):next_token_pos]
-                            is_contiguous = len(between) == 0 or all(c in '_-' for c in between)
+                            # Auto-detect delimiters: non-alphanumeric characters
+                            is_contiguous = len(between) == 0 or all(not c.isalnum() for c in between)
 
                             candidate_next_tokens[next_token] = (
                                 candidate_next_tokens.get(next_token, [0, False])[0] + 1,
@@ -130,12 +131,12 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
 
     Uses incremental honing strategy:
     1. Find common prefix of ALL matching items
-    2. Binary search for longest prefix at delimiter boundaries
+    2. Binary search for longest prefix at natural boundaries
     3. Early termination when coverage changes
 
     For example:
-    - *sio* → pd_sio/* → pd_sio/asio/asio_spis/* (if still matches same items)
-    - pd_sio/* → pd_sio/asio/* → pd_sio/asio/asio_spis/* (if still matches same items)
+    - *sio* → pd_sio* → pd_sio/asio/asio_spis* (if still matches same items)
+    - pd_sio* → pd_sio/asio* → pd_sio/asio/asio_spis* (if still matches same items)
 
     Args:
         pattern: Current pattern (e.g., "*sio*")
@@ -143,7 +144,7 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
         exclude: Items that should NOT match
 
     Returns:
-        Expanded pattern (e.g., "pd_sio/asio/asio_spis/*")
+        Expanded pattern (e.g., "pd_sio/asio/asio_spis*")
     """
     # Safety check to prevent hangs
     if not include:
@@ -197,12 +198,12 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
             best_length = len(extended_multi.replace('*', ''))
 
         # Then try converting to prefix pattern for even more specificity
-        # Find delimiter positions - these are natural breakpoints
-        delimiters = ['/', '_', '.', '-']
+        # Auto-detect delimiter positions from actual common prefix
+        # Any non-alphanumeric character is considered a potential boundary
         candidate_positions = []
 
         for i, ch in enumerate(common_prefix):
-            if ch in delimiters:
+            if not ch.isalnum():
                 candidate_positions.append(i + 1)
 
         # Always try full common prefix
@@ -251,20 +252,20 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
             except:
                 continue
 
-    # Strategy 2: If pattern is prefix/*, try extending the prefix
-    elif pattern.endswith('/*'):
-        prefix_part = pattern[:-2]  # Remove /*
+    # Strategy 2: If pattern is prefix*, try extending the prefix
+    elif pattern.endswith('*') and not pattern.startswith('*'):
+        prefix_part = pattern[:-1]  # Remove trailing *
 
         # Find where in common_prefix we should extend to
         if common_prefix.startswith(prefix_part):
             remaining = common_prefix[len(prefix_part):]
 
-            # Find delimiter positions in the remaining part
-            delimiters = ['/', '_', '.', '-']
+            # Auto-detect delimiter positions in the remaining part
+            # Any non-alphanumeric character is a potential boundary
             candidate_positions = []
 
             for i, ch in enumerate(remaining):
-                if ch in delimiters:
+                if not ch.isalnum():
                     candidate_positions.append(len(prefix_part) + i + 1)
 
             # Add full length
@@ -277,7 +278,7 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
             # Hone in on best pattern: try longest first, stop on coverage change
             for pos in candidate_positions[:10]:  # Limit to 10 candidates
                 extended_prefix = common_prefix[:pos]
-                new_pattern = extended_prefix + '/*'
+                new_pattern = extended_prefix + '*'
 
                 # Incremental validation with bitsets
                 try:
