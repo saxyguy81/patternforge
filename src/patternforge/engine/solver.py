@@ -32,10 +32,10 @@ class _Context:
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "w_fp": 1.0,
     "w_fn": 1.0,
-    "w_pattern": 0.05,
-    "w_op": 0.02,
+    "w_pattern": 0.35,  # Increased from 0.05 to discourage adding redundant patterns
+    "w_op": 0.05,  # Increased from 0.02 to discourage ORing many patterns
     "w_wc": 0.005,  # Reduced from 0.01 to be less punishing on multi-wildcard patterns
-    "w_len": -0.01,  # Increased from -0.003 to reward specificity (non-wildcard chars)
+    "w_len": -0.01,  # Negative = reward longer/more specific patterns
 }
 
 
@@ -195,7 +195,7 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
                 exclude_bits=new_exclude_bits,
             )
             trial_cost = _cost(trial, len(ctx.include), weights)
-            if trial_cost <= best_cost:
+            if trial_cost < best_cost:
                 selection = trial
                 best_cost = trial_cost
                 changed = True
@@ -783,9 +783,10 @@ def propose_solution(
     selection = _greedy_select(ctx, candidates)
     base_solution = _make_solution(include, exclude, selection, options, inverted=False)
 
-    # Expand patterns if w_len is negative (rewarding longer patterns)
+    # Expand patterns if w_len is negative (rewarding longer patterns) AND there are exclude items
+    # (expansion without excludes tends to over-generalize to common prefix)
     weights = _resolve_weights(options)
-    if weights["w_len"] < 0 and base_solution.patterns:
+    if weights["w_len"] < 0 and base_solution.patterns and exclude:
         from .expansion import expand_patterns
         expanded_patterns = expand_patterns(base_solution.patterns, include, exclude)
         # Update solution with expanded patterns and recalculate metrics

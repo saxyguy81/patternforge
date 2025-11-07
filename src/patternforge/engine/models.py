@@ -43,8 +43,8 @@ class OptimizeWeights:
     w_field: dict[str, float] | None = None
     w_fp: float | dict[str, float] = 1.0
     w_fn: float | dict[str, float] = 1.0
-    w_pattern: float | dict[str, float] = 0.05
-    w_op: float | dict[str, float] = 0.02
+    w_pattern: float | dict[str, float] = 0.35
+    w_op: float | dict[str, float] = 0.05
     w_wc: float | dict[str, float] = 0.005
     w_len: float | dict[str, float] = -0.01
 

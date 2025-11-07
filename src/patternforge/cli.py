@@ -134,18 +134,18 @@ def _resolve_weights(args: argparse.Namespace) -> dict[str, float]:
         return {
             "w_fp": payload.get("w_fp", 1.0),
             "w_fn": payload.get("w_fn", 1.0),
-            "w_pattern": payload.get("w_pattern", 0.05),
-            "w_op": payload.get("w_op", 0.02),
-            "w_wc": payload.get("w_wc", 0.01),
-            "w_len": payload.get("w_len", 0.001),
+            "w_pattern": payload.get("w_pattern", 0.35),
+            "w_op": payload.get("w_op", 0.05),
+            "w_wc": payload.get("w_wc", 0.005),
+            "w_len": payload.get("w_len", -0.01),
         }
     return {
         "w_fp": args.w_fp if args.w_fp is not None else 1.0,
         "w_fn": args.w_fn if args.w_fn is not None else 1.0,
-        "w_pattern": args.w_pattern if args.w_pattern is not None else 0.05,
-        "w_op": args.w_op if args.w_op is not None else 0.02,
-        "w_wc": args.w_wc if args.w_wc is not None else 0.01,
-        "w_len": args.w_len if args.w_len is not None else 0.001,
+        "w_pattern": args.w_pattern if args.w_pattern is not None else 0.35,
+        "w_op": args.w_op if args.w_op is not None else 0.05,
+        "w_wc": args.w_wc if args.w_wc is not None else 0.005,
+        "w_len": args.w_len if args.w_len is not None else -0.01,
     }
 
 
