@@ -28,33 +28,60 @@ def _read_jsonl(handle: TextIO) -> list[str]:
         if not raw:
             continue
         obj = json.loads(raw)
-        if isinstance(obj, dict) and "item" in obj:
-            value = obj["item"]
+        # For dicts, join all values; for scalars, use directly
+        if isinstance(obj, dict):
+            value = "/".join(str(v) for v in obj.values() if v)
         else:
             value = obj
         data.append(str(value))
     return data
 
 
-def _read_csv(handle: TextIO, column: str = "item") -> list[str]:
+def _read_csv(handle: TextIO, column: str | None = None, columns: list[str] | None = None) -> list[str]:
+    """Read CSV file.
+
+    Args:
+        handle: File handle to read from
+        column: Single column name to use (if not specified, joins all columns)
+        columns: List of column names to join together (overrides column parameter)
+
+    Returns:
+        List of strings (single column values or joined multi-column values)
+    """
     reader = csv.DictReader(handle)
     fieldnames = reader.fieldnames or []
-    if column in fieldnames:
+
+    # If columns specified, join them together
+    if columns:
+        missing = [col for col in columns if col not in fieldnames]
+        if missing:
+            raise ValueError(f"CSV missing specified columns: {missing}")
+
+        items: list[str] = []
+        for row in reader:
+            components: list[str] = []
+            for name in columns:
+                value = row.get(name, "")
+                if value:
+                    components.append(str(value).strip())
+            if components:
+                items.append("/".join(components))
+        return items
+
+    # If single column specified, use that
+    if column:
+        if column not in fieldnames:
+            raise ValueError(
+                f"CSV missing column '{column}'. "
+                f"Available columns: {fieldnames}"
+            )
         return [row[column] for row in reader if row.get(column)]
 
-    # Fallback: compose a hierarchical path from common field names.
-    join_fields = [
-        name for name in ("module", "instance", "pin", "signal") if name in fieldnames
-    ]
-    if not join_fields:
-        raise ValueError(
-            "CSV missing required column 'item' and no supported composite columns were found"
-        )
-
+    # Otherwise join all columns
     items: list[str] = []
     for row in reader:
         components: list[str] = []
-        for name in join_fields:
+        for name in fieldnames:
             value = row.get(name, "")
             if value:
                 components.append(str(value).strip())

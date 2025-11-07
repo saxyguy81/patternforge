@@ -220,28 +220,27 @@ def explain_simple(
     label = "removed" if term_method == "subtractive" else "matches"
     lines: list[str] = []
     if structured:
-        order = ["module", "instance", "pin"]
+        # Collect all field names from expressions to determine ordering
+        all_field_names = set()
+        for t in expressions:
+            fields = t.get("fields", {}) or {}
+            not_fields = t.get("not_fields", {}) or {}
+            all_field_names.update(fields.keys())
+            all_field_names.update(not_fields.keys())
+        # Use sorted field names for consistent ordering
+        order = sorted(all_field_names)
+
         for t in terms_sorted:
             fields = t.get("fields", {}) or {}
             not_fields = t.get("not_fields", {}) or {}
             parts: list[str] = []
-            # Show canonical fields in order, skip wildcard-only '*' fields
+            # Show fields in sorted order, skip wildcard-only '*' fields
             for k in order:
-                pat = fields.get(k)
-                if pat and pat != "*":
-                    parts.append(f"{k}: {pat}")
-            # Include any additional fields deterministically, skipping '*'
-            extra_keys = sorted(set(fields.keys()) - set(order))
-            for k in extra_keys:
                 pat = fields.get(k)
                 if pat and pat != "*":
                     parts.append(f"{k}: {pat}")
             # Append negative fields as '- key: pattern'
             for k in order:
-                npat = not_fields.get(k)
-                if npat and npat != "*":
-                    parts.append(f"- {k}: {npat}")
-            for k in sorted(set(not_fields.keys()) - set(order)):
                 npat = not_fields.get(k)
                 if npat and npat != "*":
                     parts.append(f"- {k}: {npat}")

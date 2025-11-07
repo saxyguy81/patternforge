@@ -38,8 +38,6 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--invert", choices=["never", "auto", "always"], default="auto")
         cmd.add_argument("--splitmethod", choices=["classchange", "char"], default="classchange")
         cmd.add_argument("--schema")
-        cmd.add_argument("--delimiter")
-        cmd.add_argument("--fields")
         cmd.add_argument("--min-token-len", type=int, default=3)
         cmd.add_argument("--per-word-substrings", type=int, default=16)
         cmd.add_argument("--per-word-multi", type=int, default=4)

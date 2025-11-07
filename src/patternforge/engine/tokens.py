@@ -5,9 +5,6 @@ import re
 from collections.abc import Iterator, Sequence
 from typing import Callable
 
-_SPLIT_RE = re.compile(r"([/_\.-])")
-
-
 class Token:
     __slots__ = ("value", "index")
 
@@ -99,33 +96,11 @@ def _merge_short_tokens(raw_tokens: list[str], min_token_len: int, joiner: str =
     return merged_tokens
 
 
-def _split_delimiters(text: str, min_token_len: int = 3) -> list[str]:
-    """Split on delimiters and merge tokens that are too short."""
-    raw_tokens = [t for t in _SPLIT_RE.split(text) if t and not _SPLIT_RE.match(t)]
-    # Merge tokens that are too short with the next token
-    merged_tokens = []
-    i = 0
-    while i < len(raw_tokens):
-        token = raw_tokens[i]
-        # If token is too short and there's a next token, merge them
-        while len(token) < min_token_len and i + 1 < len(raw_tokens):
-            i += 1
-            token = token + "_" + raw_tokens[i]  # Use underscore as joiner
-        merged_tokens.append(token)
-        i += 1
-    return merged_tokens
-
-
 def tokenize(text: str, splitmethod: str = "classchange", min_token_len: int = 3) -> list[Token]:
     if splitmethod == "char":
         # Split into individual characters
         raw_tokens = list(text)
         effective_min_len = 1  # Characters are always length 1
-        tokens_with_indices = [(t, i) for i, t in enumerate(raw_tokens)]
-    elif splitmethod == "delimiter":
-        # Split on delimiters with merging for short tokens
-        raw_tokens = _split_delimiters(text, min_token_len)
-        effective_min_len = min_token_len
         tokens_with_indices = [(t, i) for i, t in enumerate(raw_tokens)]
     else:  # classchange
         # Split on character class changes, then merge short tokens
