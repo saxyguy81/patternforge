@@ -214,7 +214,7 @@ CSV files are automatically parsed:
 ```python
 from patternforge import io
 
-# Auto-detects CSV and composes paths from module/instance/pin
+# Auto-detects CSV format and joins all columns
 include = io.read_items("connections.csv")
 solution = propose_solution(include, exclude)
 ```
