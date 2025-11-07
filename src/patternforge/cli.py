@@ -29,44 +29,113 @@ def _parse_invert(value: str) -> str:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="patternforge", description="Pattern discovery CLI")
+    parser = argparse.ArgumentParser(
+        prog="patternforge",
+        description="""Pattern discovery tool for hierarchical data.
+
+Finds glob patterns that match include items but avoid exclude items.
+Supports both simple pattern matching and structured multi-field data.
+
+Terminology:
+  FP (False Positive): Exclude item that matches (bad)
+  FN (False Negative): Include item that doesn't match (bad)
+  Coverage: Fraction of include items matched
+
+Examples:
+  # Basic usage
+  patternforge propose --include items.txt --exclude unwanted.txt
+
+  # Require zero false positives
+  patternforge propose --include items.txt --mode EXACT
+
+  # Limit solution complexity
+  patternforge propose --include items.txt --max-patterns 3 --max-fp 0
+
+For more info: https://github.com/anthropics/patternforge""",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("-V", "--version", action="version", version="patternforge 0.1")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common_options(cmd: argparse.ArgumentParser) -> None:
-        cmd.add_argument("--mode", choices=["EXACT", "APPROX"], default="EXACT")
-        cmd.add_argument("--invert", choices=["never", "auto", "always"], default="auto")
-        cmd.add_argument("--splitmethod", choices=["classchange", "char"], default="classchange")
-        cmd.add_argument("--schema")
-        cmd.add_argument("--min-token-len", type=int, default=3)
-        cmd.add_argument("--per-word-substrings", type=int, default=16)
-        cmd.add_argument("--per-word-multi", type=int, default=4)
-        cmd.add_argument("--per-word-cuts", type=int, default=32)
-        cmd.add_argument("--max-candidates", type=int, default=4000)
-        cmd.add_argument("--depth", type=int)
-        cmd.add_argument("--max-patterns", type=int)
-        cmd.add_argument("--max-ops", type=int)
-        cmd.add_argument("--max-multi-segments", type=int, default=3)
+        # === Core Quality Settings ===
+        cmd.add_argument("--mode", choices=["EXACT", "APPROX"], default="EXACT",
+                        help="EXACT=zero false positives (default), APPROX=allow some FPs for simpler patterns")
+        cmd.add_argument("--invert", choices=["never", "auto", "always"], default="auto",
+                        help="Pattern inversion strategy (default: auto)")
+
+        # === Input/Output ===
+        cmd.add_argument("--include", required=True,
+                        help="File with items to match (.txt, .csv, .json, .jsonl)")
+        cmd.add_argument("--exclude",
+                        help="File with items to avoid (optional)")
+        cmd.add_argument("--out", default="-",
+                        help="Output file (default: stdout)")
+        cmd.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format")
+        cmd.add_argument("--schema",
+                        help="Schema file for structured data")
+        cmd.add_argument("--save-solution",
+                        help="Save solution to file for later evaluation")
+
+        # === Budget Constraints (Hard Limits) ===
+        cmd.add_argument("--max-candidates", type=int, default=4000,
+                        help="Max candidate patterns to consider (default: 4000)")
+        cmd.add_argument("--max-patterns", type=int,
+                        help="Max patterns in solution (EXACT mode default: 8)")
+        cmd.add_argument("--max-fp", type=int,
+                        help="Max false positives allowed (EXACT mode enforces 0)")
+        cmd.add_argument("--max-fn", type=int,
+                        help="Max false negatives allowed")
+        cmd.add_argument("--max-multi-segments", type=int, default=3,
+                        help="Max segments in multi-wildcard patterns like *a*b*c* (default: 3)")
+
+        # === Pattern Generation ===
+        cmd.add_argument("--splitmethod", choices=["classchange", "char"], default="classchange",
+                        help="Token splitting: classchange=smart (default), char=character-by-character")
+        cmd.add_argument("--min-token-len", type=int, default=3,
+                        help="Minimum token length to consider (default: 3)")
+        cmd.add_argument("--per-word-substrings", type=int, default=16,
+                        help="Top N substrings per token (default: 16)")
+        cmd.add_argument("--per-word-multi", type=int, default=4,
+                        help="Multi-segment patterns per token pair (default: 4)")
+        cmd.add_argument("--per-word-cuts", type=int, default=32,
+                        help="Token boundary positions (default: 32)")
         cmd.add_argument(
             "--allowed-patterns",
             nargs="+",
             choices=["exact", "substring", "prefix", "suffix", "multi"],
-            help="Restrict pattern types (exact, substring, prefix, suffix, multi)",
+            help="Restrict pattern types (e.g., --allowed-patterns prefix suffix)",
         )
-        cmd.add_argument("--max-fp", type=int)
-        cmd.add_argument("--max-fn", type=int)
-        cmd.add_argument("--w-fp", type=float)
-        cmd.add_argument("--w-fn", type=float)
-        cmd.add_argument("--w-pattern", type=float)
-        cmd.add_argument("--w-op", type=float)
-        cmd.add_argument("--w-wc", type=float)
-        cmd.add_argument("--w-len", type=float)
-        cmd.add_argument("--weights")
+
+        # === Cost Function Weights ===
+        # Higher weight = penalize more (except w_len which is negative = reward)
+        cmd.add_argument("--w-fp", type=float,
+                        help="False positive penalty (default: 1.0)")
+        cmd.add_argument("--w-fn", type=float,
+                        help="False negative penalty (default: 1.0)")
+        cmd.add_argument("--w-pattern", type=float,
+                        help="Pattern count penalty (default: 0.35)")
+        cmd.add_argument("--w-op", type=float,
+                        help="Boolean OR operation penalty (default: 0.05)")
+        cmd.add_argument("--w-wc", type=float,
+                        help="Wildcard count penalty (default: 0.005)")
+        cmd.add_argument("--w-len", type=float,
+                        help="Pattern length reward - NEGATIVE = longer is better (default: -0.01)")
+        cmd.add_argument("--weights",
+                        help="JSON file with custom weights")
+
+        # === Advanced Options ===
+        cmd.add_argument("--depth", type=int,
+                        help="Search depth (advanced)")
+        cmd.add_argument("--max-ops", type=int,
+                        help="Max boolean operations (advanced)")
         cmd.add_argument(
             "--allow-not-on-patterns",
             dest="allow_not_on_patterns",
             action="store_true",
             default=True,
+            help="Allow NOT operations on patterns (default: True)"
         )
         cmd.add_argument("--no-allow-not-on-patterns", dest="allow_not_on_patterns", action="store_false")
         cmd.add_argument(
@@ -74,54 +143,72 @@ def _build_parser() -> argparse.ArgumentParser:
             dest="allow_complex_terms",
             action="store_true",
             default=False,
+            help="Allow complex boolean terms (A & B, A - B) (default: False)"
         )
         cmd.add_argument(
             "--no-allow-complex-terms",
             dest="allow_complex_terms",
             action="store_false",
         )
-        cmd.add_argument("--seed", type=int, default=0)
-        cmd.add_argument("--threads", type=int, default=1)
-        cmd.add_argument("--include", required=True)
-        cmd.add_argument("--exclude")
-        cmd.add_argument("--out", default="-")
-        cmd.add_argument("--format", choices=["text", "json"], default="text")
-        cmd.add_argument("--emit-witnesses", action="store_true", default=False)
-        cmd.add_argument("--max-examples", type=int, default=8)
-        cmd.add_argument("--save-solution")
+        cmd.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
+        cmd.add_argument("--threads", type=int, default=1, help="Number of threads (default: 1)")
 
-    propose = sub.add_parser("propose", help="propose a new expression")
+        # === Output Options ===
+        cmd.add_argument("--emit-witnesses", action="store_true", default=False,
+                        help="Include example matches/mismatches in output")
+        cmd.add_argument("--max-examples", type=int, default=8,
+                        help="Max examples to show (default: 8)")
+
+    propose = sub.add_parser("propose",
+                            help="Propose patterns for include/exclude data",
+                            description="Find glob patterns that match include items but avoid exclude items")
     add_common_options(propose)
     propose.add_argument(
         "--structured-terms",
         dest="structured_terms",
         action="store_true",
         default=False,
-        help="Emit structured terms (fields + metrics) instead of full solution when --format json",
+        help="Output structured terms (fields + metrics) for multi-field data",
     )
 
-    evaluate = sub.add_parser("evaluate", help="evaluate an expression")
-    evaluate.add_argument("--include", required=True)
-    evaluate.add_argument("--exclude")
-    evaluate.add_argument("--expr", required=True)
-    evaluate.add_argument("--patterns", required=True)
+    evaluate = sub.add_parser("evaluate",
+                             help="Evaluate an expression against data",
+                             description="Test how well a pattern expression matches include/exclude data")
+    evaluate.add_argument("--include", required=True,
+                         help="File with items to match")
+    evaluate.add_argument("--exclude",
+                         help="File with items to avoid")
+    evaluate.add_argument("--expr", required=True,
+                         help="Boolean expression to evaluate (e.g., 'P1 | P2')")
+    evaluate.add_argument("--patterns", required=True,
+                         help="JSON file with pattern definitions")
     evaluate.add_argument("--format", choices=["text", "json"], default="text")
 
-    explain = sub.add_parser("explain", help="explain a saved solution")
-    explain.add_argument("--solution", required=True)
+    explain = sub.add_parser("explain",
+                            help="Explain a saved solution",
+                            description="Show detailed breakdown of a saved solution")
+    explain.add_argument("--solution", required=True,
+                        help="Saved solution file (JSON)")
     explain.add_argument("--format", choices=["text", "json", "simple"], default="text")
 
-    summarize = sub.add_parser("summarize", help="summarize a solution")
-    summarize.add_argument("--solution", required=True)
+    summarize = sub.add_parser("summarize",
+                              help="Summarize a solution",
+                              description="Show concise summary of a saved solution")
+    summarize.add_argument("--solution", required=True,
+                          help="Saved solution file (JSON)")
 
-    dumpc = sub.add_parser("dump-candidates", help="debug candidate list")
-    dumpc.add_argument("--include", required=True)
+    dumpc = sub.add_parser("dump-candidates",
+                          help="Debug: dump candidate patterns",
+                          description="Show candidate patterns generated for debugging")
+    dumpc.add_argument("--include", required=True,
+                      help="File with items to analyze")
     dumpc.add_argument("--splitmethod", choices=["classchange", "char"], default="classchange")
     dumpc.add_argument("--min-token-len", type=int, default=3)
     dumpc.add_argument("--per-word-substrings", type=int, default=16)
     dumpc.add_argument("--per-word-multi", type=int, default=4)
     dumpc.add_argument("--max-multi-segments", type=int, default=3)
-    dumpc.add_argument("--top", type=int, default=50)
+    dumpc.add_argument("--top", type=int, default=50,
+                      help="Number of top candidates to show (default: 50)")
     dumpc.add_argument("--format", choices=["text", "json"], default="json")
     return parser
 
