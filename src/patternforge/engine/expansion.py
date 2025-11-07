@@ -98,9 +98,9 @@ def _try_extend_multi_wildcard(pattern: str, include: list[str], exclude: list[s
                 if match_pattern(item, new_pattern):
                     new_match_bits |= (1 << idx)
 
-            # Stop if coverage changed
+            # Skip if coverage changed, but try next token
             if new_match_bits != current_match_bits:
-                break
+                continue
 
             new_fp_bits = 0
             for idx, item in enumerate(exclude[:100]):
@@ -117,10 +117,9 @@ def _try_extend_multi_wildcard(pattern: str, include: list[str], exclude: list[s
                     best_extended = new_pattern
                     best_length = new_length
                     current_pattern = new_pattern  # Continue extending from this
-            else:
-                break  # FP increased, stop
+            # If FP increased, skip this token but continue trying others
         except:
-            break
+            continue  # Skip failed token, try next one
 
     return best_extended if best_extended != pattern else None
 
