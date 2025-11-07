@@ -78,6 +78,34 @@ def generate_candidates(
             return score * weight
         return score
 
+    # Generate global prefix patterns from longest common prefix across ALL include items
+    # This generates patterns like "pd_sio/asio/asio_spis/*" instead of just "pd_sio*"
+    if not using_custom_tokenizer and len(include) >= 2 and is_allowed("prefix", None):
+        # Find longest common prefix
+        include_lower = [s.lower() for s in include]
+        common_prefix = include_lower[0]
+        for s in include_lower[1:]:
+            # Find common prefix between common_prefix and s
+            i = 0
+            while i < len(common_prefix) and i < len(s) and common_prefix[i] == s[i]:
+                i += 1
+            common_prefix = common_prefix[:i]
+
+        # Extend to last delimiter boundary (non-alphanumeric character)
+        if len(common_prefix) > 0:
+            # Find the last delimiter position before divergence
+            last_delim_pos = 0
+            for i, ch in enumerate(common_prefix):
+                if not ch.isalnum():
+                    last_delim_pos = i + 1  # Include the delimiter
+
+            if last_delim_pos > 0:
+                # Create prefix pattern up to last delimiter
+                prefix_pattern = common_prefix[:last_delim_pos] + "*"
+                # High score to prefer this over per-item prefixes
+                score = len(common_prefix[:last_delim_pos]) * 2.0
+                pool.push(prefix_pattern, "prefix", apply_weight(float(score), None), None)
+
     for (idx_field, tokens) in token_lists.items():
         _, field = idx_field
         original_str = original_strings.get(idx_field, "")
