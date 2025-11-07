@@ -63,7 +63,8 @@ def test_generate_candidates_with_custom_iter() -> None:
     assert "*beta*" in patterns
     assert "alpha" in patterns
     assert "beta" in patterns
-    assert "alpha/beta" in patterns or "beta/alpha" in patterns
+    # Custom tokenizers concatenate without separator
+    assert "alphabeta" in patterns
 
 
 def test_propose_solution_with_structured_tokenizer_finds_bank() -> None:

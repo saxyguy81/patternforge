@@ -21,9 +21,3 @@ def test_bitset_operations() -> None:
 
     assert bitset.and_bits(toggled, mask) == mask
     assert bitset.set_bits(0, mask) == mask
-
-
-def test_full_mask() -> None:
-    mask = bitset.full_bitset(5)
-    assert mask == 0b11111
-    assert bitset.mask_for_length(5) == mask

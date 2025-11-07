@@ -88,13 +88,17 @@ def generate_candidates(
                 score = len(token)
                 pool.push(pattern, "substring", apply_weight(float(score), field), field)
 
-        joined = "/".join(tokens)
-        # Generate joined exact match
-        # For custom tokenizers (no original_str), always generate
-        # For standard tokenizers, only if it matches the original
-        if joined and is_allowed("exact", field):
-            if not original_str or joined == original_str:
-                pool.push(joined, "exact", apply_weight(float(len(joined)), field), field)
+        # Generate exact match from original string (for standard tokenizers)
+        # or concatenated tokens (for custom tokenizers)
+        if is_allowed("exact", field):
+            if original_str:
+                # Use actual original string to preserve separators
+                pool.push(original_str, "exact", apply_weight(float(len(original_str)), field), field)
+            else:
+                # For custom tokenizers, concatenate tokens without separator
+                joined = "".join(tokens)
+                if joined:
+                    pool.push(joined, "exact", apply_weight(float(len(joined)), field), field)
 
         for token in tokens:
             # For individual tokens, generate exact matches
@@ -102,23 +106,23 @@ def generate_candidates(
             if is_allowed("exact", field):
                 pool.push(token, "exact", apply_weight(float(len(token)), field), field)
 
-        # Generate prefix patterns: token/* (anchored start)
+        # Generate prefix patterns: token* (anchored start)
         # Only if token actually appears at the start of the original string
         if len(tokens) >= 1 and tokens[0] and is_allowed("prefix", field):
             first_token = tokens[0]
             if original_str.startswith(first_token):
-                pattern = f"{first_token}/*"
+                pattern = f"{first_token}*"
                 # Score higher than substring to prefer anchored patterns
                 # Fewer wildcards (1) vs substring (2) should be preferred
                 score = len(first_token) * 1.5
                 pool.push(pattern, "prefix", apply_weight(float(score), field), field)
 
-        # Generate suffix patterns: */token (anchored end)
+        # Generate suffix patterns: *token (anchored end)
         # Only if token actually appears at the end of the original string
         if len(tokens) >= 1 and tokens[-1] and is_allowed("suffix", field):
             last_token = tokens[-1]
             if original_str.endswith(last_token):
-                pattern = f"*/{last_token}"
+                pattern = f"*{last_token}"
                 # Score higher than substring to prefer anchored patterns
                 score = len(last_token) * 1.5
                 pool.push(pattern, "suffix", apply_weight(float(score), field), field)

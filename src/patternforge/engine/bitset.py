@@ -1,6 +1,7 @@
 """Integer bitset utilities."""
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable
 
 
@@ -11,16 +12,15 @@ def make_bitset(indexes: Iterable[int]) -> int:
     return value
 
 
-def full_bitset(count: int) -> int:
-    if count >= 63:
-        return (1 << count) - 1
-    return (1 << count) - 1
-
-
-def count_bits(value: int) -> int:
-    """Count the number of set bits in an integer (Python 3.9 compatible)."""
-    # Python 3.10+ has int.bit_count(), but for 3.9 we use bin().count('1')
-    return bin(value).count('1')
+# Optimize bit counting based on Python version (cached at module load time)
+if sys.version_info >= (3, 10):
+    def count_bits(value: int) -> int:
+        """Count the number of set bits using native int.bit_count() (Python 3.10+)."""
+        return value.bit_count()
+else:
+    def count_bits(value: int) -> int:
+        """Count the number of set bits using bin().count('1') (Python 3.9)."""
+        return bin(value).count('1')
 
 
 def iter_indexes(value: int) -> Iterable[int]:
@@ -30,12 +30,6 @@ def iter_indexes(value: int) -> Iterable[int]:
             yield index
         value >>= 1
         index += 1
-
-
-def mask_for_length(length: int) -> int:
-    if length >= 63:
-        return (1 << length) - 1
-    return (1 << length) - 1
 
 
 def clear_bits(base: int, remove: int) -> int:
