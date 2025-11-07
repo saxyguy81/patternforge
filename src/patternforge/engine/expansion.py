@@ -1,7 +1,128 @@
 """Pattern expansion utilities for refining patterns to be more specific."""
 
+from typing import Optional
 from . import bitset
 from .matcher import match_pattern
+
+
+def _try_extend_multi_wildcard(pattern: str, include: list[str], exclude: list[str],
+                                current_match_bits: int, current_fp_bits: int) -> Optional[str]:
+    """
+    Try extending a multi-wildcard pattern incrementally: *a* → *a*b* → *a*b*c*
+
+    This allows honing in on longer multi-wildcard patterns without generating
+    all possibilities upfront.
+
+    Example: *sio* → *sio*asio* → *sio*asio*spis*
+    """
+    # Extract current segments from pattern
+    segments = [s for s in pattern.split('*') if s]
+
+    if not segments or len(segments) >= 5:  # Limit to 5 segments for performance
+        return None
+
+    # Extract matching items
+    current_matches = [include[idx] for idx in range(min(len(include), 100))
+                      if (current_match_bits >> idx) & 1]
+
+    if not current_matches:
+        return None
+
+    # Find common tokens that appear after the last segment in all matches
+    # Tokenize each match to find potential next segments
+    import re
+
+    def simple_tokenize(text: str) -> list[str]:
+        """Extract tokens of 3+ alphanumeric chars"""
+        return [t.lower() for t in re.findall(r'[a-zA-Z0-9]{3,}', text)]
+
+    # For each match, find tokens that appear after the last segment
+    last_segment = segments[-1]
+    candidate_next_tokens = {}
+
+    for match_text in current_matches:
+        tokens = simple_tokenize(match_text)
+        # Find position of last segment
+        try:
+            last_idx = tokens.index(last_segment)
+            # Get tokens after it
+            for next_token in tokens[last_idx + 1:]:
+                if next_token not in segments:  # Don't repeat existing segments
+                    # Check if this token is contiguous with last segment in original text
+                    # Contiguous = no other characters/delimiters between them
+                    last_segment_pos = match_text.lower().find(last_segment)
+                    if last_segment_pos >= 0:
+                        # Find next_token after last_segment
+                        search_start = last_segment_pos + len(last_segment)
+                        next_token_pos = match_text.lower().find(next_token, search_start)
+                        if next_token_pos >= 0:
+                            # Check what's between them
+                            between = match_text[last_segment_pos + len(last_segment):next_token_pos]
+                            is_contiguous = len(between) == 0 or all(c in '_-' for c in between)
+
+                            candidate_next_tokens[next_token] = (
+                                candidate_next_tokens.get(next_token, [0, False])[0] + 1,
+                                is_contiguous
+                            )
+        except ValueError:
+            continue
+
+    if not candidate_next_tokens:
+        return None
+
+    # Try tokens that appear in ALL matches (most common ones first)
+    num_matches = len(current_matches)
+    common_tokens = [(token, info) for token, info in candidate_next_tokens.items()
+                     if info[0] == num_matches]
+    common_tokens.sort(key=lambda x: -len(x[0]))  # Longest first
+
+    best_extended = pattern
+    best_length = len(pattern.replace('*', ''))
+
+    # Incrementally try adding tokens: *a* → *a*b* → *a*b*c* (or *ab* if contiguous)
+    current_pattern = pattern
+
+    for token, (count, is_contiguous) in common_tokens[:5]:  # Limit to 5 extensions
+        # Add new segment
+        if is_contiguous:
+            # Merge contiguous tokens without wildcard: *sio* + "mem" → *siomem*
+            new_pattern = current_pattern[:-1] + token + '*'
+        else:
+            # Add wildcard for non-contiguous: *sio* + "asio" → *sio*asio*
+            new_pattern = current_pattern[:-1] + '*' + token + '*'
+
+        # Check if coverage is maintained
+        try:
+            new_match_bits = 0
+            for idx, item in enumerate(include[:100]):
+                if match_pattern(item, new_pattern):
+                    new_match_bits |= (1 << idx)
+
+            # Stop if coverage changed
+            if new_match_bits != current_match_bits:
+                break
+
+            new_fp_bits = 0
+            for idx, item in enumerate(exclude[:100]):
+                if match_pattern(item, new_pattern):
+                    new_fp_bits |= (1 << idx)
+
+            # Check FP doesn't increase
+            fp_count = bitset.count_bits(new_fp_bits)
+            current_fp_count = bitset.count_bits(current_fp_bits)
+
+            if fp_count <= current_fp_count:
+                new_length = len(new_pattern.replace('*', ''))
+                if new_length > best_length:
+                    best_extended = new_pattern
+                    best_length = new_length
+                    current_pattern = new_pattern  # Continue extending from this
+            else:
+                break  # FP increased, stop
+        except:
+            break
+
+    return best_extended if best_extended != pattern else None
 
 
 def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
@@ -68,6 +189,15 @@ def expand_pattern(pattern: str, include: list[str], exclude: list[str]) -> str:
 
     # Strategy 1: If pattern is *something*, try converting to prefix/*
     if pattern.startswith('*') and pattern.endswith('*'):
+        # First, try extending with more wildcard segments: *a* → *a*b* → *a*b*c*
+        # This allows incremental honing for multi-wildcard patterns
+        extended_multi = _try_extend_multi_wildcard(pattern, include, exclude,
+                                                      current_match_bits, current_fp_bits)
+        if extended_multi and len(extended_multi.replace('*', '')) > best_length:
+            best_pattern = extended_multi
+            best_length = len(extended_multi.replace('*', ''))
+
+        # Then try converting to prefix pattern for even more specificity
         # Find delimiter positions - these are natural breakpoints
         delimiters = ['/', '_', '.', '-']
         candidate_positions = []
