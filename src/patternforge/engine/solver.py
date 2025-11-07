@@ -35,7 +35,7 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "w_pattern": 0.05,
     "w_op": 0.02,
     "w_wc": 0.01,
-    "w_len": 0.001,
+    "w_len": -0.003,  # Negative to reward longer, more specific patterns
 }
 
 
@@ -782,6 +782,30 @@ def propose_solution(
     candidates = _build_candidates(ctx)
     selection = _greedy_select(ctx, candidates)
     base_solution = _make_solution(include, exclude, selection, options, inverted=False)
+
+    # Expand patterns if w_len is negative (rewarding longer patterns)
+    weights = _resolve_weights(options)
+    if weights["w_len"] < 0 and base_solution.patterns:
+        from .expansion import expand_patterns
+        expanded_patterns = expand_patterns(base_solution.patterns, include, exclude)
+        # Update solution with expanded patterns and recalculate metrics
+        matched_expr, fp_expr, fn_expr, per_pattern = _evaluate_patterns(expanded_patterns, include, exclude)
+        base_solution = Solution(
+            expr=base_solution.expr,  # Keep same expression IDs
+            raw_expr=" | ".join(p.text for p in expanded_patterns) if expanded_patterns else "FALSE",
+            global_inverted=False,
+            term_method="additive",
+            mode=options.mode.value,
+            options=base_solution.options,
+            patterns=expanded_patterns,
+            metrics={"covered": matched_expr, "total_positive": len(include), "fp": fp_expr, "fn": fn_expr,
+                    "patterns": len(expanded_patterns), "boolean_ops": max(0, len(expanded_patterns) - 1),
+                    "wildcards": sum(p.wildcards for p in expanded_patterns),
+                    "pattern_chars": sum(p.length for p in expanded_patterns)},
+            witnesses=base_solution.witnesses,
+            expressions=base_solution.expressions,
+        )
+
     if options.invert == InvertStrategy.NEVER:
         return base_solution
     if options.invert == InvertStrategy.ALWAYS or not base_solution.patterns:
