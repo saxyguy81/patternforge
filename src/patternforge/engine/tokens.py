@@ -20,6 +20,7 @@ class Token:
 
 
 def _split_classchange(text: str) -> list[str]:
+    """Split on character class changes (alpha/digit/other)."""
     chunks: list[str] = []
     buf = []
     prev = None
@@ -34,6 +35,68 @@ def _split_classchange(text: str) -> list[str]:
     if buf:
         chunks.append("".join(buf))
     return chunks
+
+
+def _merge_short_tokens(raw_tokens: list[str], min_token_len: int, joiner: str = "") -> list[tuple[str, int]]:
+    """Merge alpha/digit tokens that are too short, preserving delimiters between them.
+
+    Args:
+        raw_tokens: List of token strings (including delimiters)
+        min_token_len: Minimum length threshold
+        joiner: String to join tokens (empty string means include actual delimiters from raw_tokens)
+
+    Returns:
+        List of (merged_token, original_index) tuples preserving original indices
+    """
+    if not raw_tokens:
+        return []
+
+    def is_delimiter_only(token: str) -> bool:
+        """Check if token contains only delimiters (non-alphanumeric chars)."""
+        return not any(c.isalnum() for c in token)
+
+    # Skip single-character alphanumeric tokens entirely as they don't carry semantic meaning
+    # But keep track of delimiters to preserve them during merging
+    merged_tokens = []
+    i = 0
+    while i < len(raw_tokens):
+        token = raw_tokens[i]
+        original_idx = i
+
+        # Skip delimiter-only and single-char alphanumeric tokens
+        if is_delimiter_only(token) or len(token) == 1:
+            i += 1
+            continue
+
+        # Token is meaningful (>1 char, has alphanumeric)
+        # Try to merge if it's still too short
+        while len(token) < min_token_len and i + 1 < len(raw_tokens):
+            i += 1
+            next_item = raw_tokens[i]
+
+            # Include delimiters in the merge to preserve actual string structure
+            if is_delimiter_only(next_item):
+                token += next_item
+                # Continue to get the next meaningful token after delimiter
+                if i + 1 < len(raw_tokens):
+                    i += 1
+                    next_item = raw_tokens[i]
+                    # Skip single-char tokens
+                    if len(next_item) == 1 and not is_delimiter_only(next_item):
+                        continue
+                    token += next_item
+            elif len(next_item) > 1:  # Only merge multi-char tokens
+                if joiner:
+                    token = token + joiner + next_item
+                else:
+                    token = token + next_item
+            # Skip single-char tokens without merging
+
+        # Only add tokens that meet minimum length
+        if len(token) >= min_token_len:
+            merged_tokens.append((token, original_idx))
+        i += 1
+    return merged_tokens
 
 
 def _split_delimiters(text: str, min_token_len: int = 3) -> list[str]:
@@ -58,15 +121,22 @@ def tokenize(text: str, splitmethod: str = "classchange", min_token_len: int = 3
         # Split into individual characters
         raw_tokens = list(text)
         effective_min_len = 1  # Characters are always length 1
+        tokens_with_indices = [(t, i) for i, t in enumerate(raw_tokens)]
     elif splitmethod == "delimiter":
         # Split on delimiters with merging for short tokens
         raw_tokens = _split_delimiters(text, min_token_len)
         effective_min_len = min_token_len
+        tokens_with_indices = [(t, i) for i, t in enumerate(raw_tokens)]
     else:  # classchange
-        raw_tokens = _split_classchange(text)
+        # Split on character class changes, then merge short tokens
+        raw_chunks = _split_classchange(text)
+        tokens_with_indices = _merge_short_tokens(raw_chunks, min_token_len, joiner="")
         effective_min_len = min_token_len
+
     tokens: list[Token] = []
-    for index, token in enumerate(raw_tokens):
+    for token, index in tokens_with_indices:
+        # After merging, all tokens should meet min_token_len
+        # But we still check in case of edge cases (e.g., very short input text)
         if len(token) >= effective_min_len:
             tokens.append(Token(token.lower(), index))
     return tokens

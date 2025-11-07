@@ -336,7 +336,7 @@ def expand_patterns(patterns: list, include: list[str], exclude: list[str]) -> l
             wildcards=expanded_text.count('*'),
             length=len(expanded_text),
             negated=pattern.negated,
-            tp=pattern.tp,
+            matches=pattern.matches,
             fp=pattern.fp,
         )
         expanded.append(expanded_pattern)

@@ -124,7 +124,7 @@ class Pattern:
     length: int
     field: str | None = None
     negated: bool = False
-    tp: int | None = None
+    matches: int | None = None  # Number of items this pattern matches
     fp: int | None = None
 
 

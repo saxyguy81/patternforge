@@ -18,7 +18,16 @@ def explain_dict(
         expr = solution.expr
     else:
         patterns_data = solution.get("patterns", [])
-        patterns = [p if isinstance(p, Pattern) else Pattern(**p) for p in patterns_data]
+        # Handle both old 'tp' and new 'matches' formats
+        def _make_pattern(p):
+            if isinstance(p, Pattern):
+                return p
+            # Convert old 'tp' key to new 'matches' key if needed
+            pattern_dict = dict(p)
+            if 'tp' in pattern_dict and 'matches' not in pattern_dict:
+                pattern_dict['matches'] = pattern_dict.pop('tp')
+            return Pattern(**pattern_dict)
+        patterns = [_make_pattern(p) for p in patterns_data]
         global_inverted = bool(solution.get("global_inverted", False))
         expr = solution.get("expr", "FALSE")
 

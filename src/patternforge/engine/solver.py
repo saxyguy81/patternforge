@@ -285,7 +285,7 @@ def _make_solution(
                 wildcards=pattern.wildcards,
                 length=pattern.length,
                 negated=pattern.negated,
-                tp=stats["tp"],
+                matches=stats["tp"],
                 fp=stats["fp"],
             )
         )

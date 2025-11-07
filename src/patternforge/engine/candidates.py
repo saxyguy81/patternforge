@@ -36,6 +36,12 @@ def generate_candidates(
 ) -> list[tuple[str, str, float, str | None]]:
     pool = CandidatePool()
     token_lists: dict[int, list[str]] = defaultdict(list)
+    # Store mapping from (idx, field) to original string for position checking
+    original_strings: dict[tuple[int, str | None], str] = {}
+
+    # Detect if using custom tokenizer by checking if user provided token_iter
+    using_custom_tokenizer = token_iter is not None
+
     if token_iter is None:
         token_iter = iter_tokens(include, splitmethod=splitmethod, min_token_len=min_token_len)
     for entry in token_iter:
@@ -46,6 +52,10 @@ def generate_candidates(
             idx, token, field = entry  # type: ignore[misc]
         key = (idx, field)
         token_lists[key].append(token.value)
+        # Store original string for position checking (only for non-custom tokenizers)
+        # Custom tokenizers may provide semantic tokens not derived from the string
+        if key not in original_strings and not using_custom_tokenizer:
+            original_strings[key] = include[idx].lower()
 
     # Helper to check if a pattern kind is allowed for a given field
     def is_allowed(kind: str, field: str | None) -> bool:
@@ -70,34 +80,48 @@ def generate_candidates(
 
     for (idx_field, tokens) in token_lists.items():
         _, field = idx_field
+        original_str = original_strings.get(idx_field, "")
+
         for token in tokens[:per_word_substrings]:
             if is_allowed("substring", field):
                 pattern = f"*{token}*"
                 score = len(token)
                 pool.push(pattern, "substring", apply_weight(float(score), field), field)
+
         joined = "/".join(tokens)
+        # Generate joined exact match
+        # For custom tokenizers (no original_str), always generate
+        # For standard tokenizers, only if it matches the original
         if joined and is_allowed("exact", field):
-            pool.push(joined, "exact", apply_weight(float(len(joined)), field), field)
+            if not original_str or joined == original_str:
+                pool.push(joined, "exact", apply_weight(float(len(joined)), field), field)
+
         for token in tokens:
+            # For individual tokens, generate exact matches
+            # This is needed for custom tokenizers where tokens are semantic units
             if is_allowed("exact", field):
                 pool.push(token, "exact", apply_weight(float(len(token)), field), field)
 
         # Generate prefix patterns: token/* (anchored start)
+        # Only if token actually appears at the start of the original string
         if len(tokens) >= 1 and tokens[0] and is_allowed("prefix", field):
             first_token = tokens[0]
-            pattern = f"{first_token}/*"
-            # Score higher than substring to prefer anchored patterns
-            # Fewer wildcards (1) vs substring (2) should be preferred
-            score = len(first_token) * 1.5
-            pool.push(pattern, "prefix", apply_weight(float(score), field), field)
+            if original_str.startswith(first_token):
+                pattern = f"{first_token}/*"
+                # Score higher than substring to prefer anchored patterns
+                # Fewer wildcards (1) vs substring (2) should be preferred
+                score = len(first_token) * 1.5
+                pool.push(pattern, "prefix", apply_weight(float(score), field), field)
 
         # Generate suffix patterns: */token (anchored end)
+        # Only if token actually appears at the end of the original string
         if len(tokens) >= 1 and tokens[-1] and is_allowed("suffix", field):
             last_token = tokens[-1]
-            pattern = f"*/{last_token}"
-            # Score higher than substring to prefer anchored patterns
-            score = len(last_token) * 1.5
-            pool.push(pattern, "suffix", apply_weight(float(score), field), field)
+            if original_str.endswith(last_token):
+                pattern = f"*/{last_token}"
+                # Score higher than substring to prefer anchored patterns
+                score = len(last_token) * 1.5
+                pool.push(pattern, "suffix", apply_weight(float(score), field), field)
 
         if len(tokens) >= 2 and is_allowed("multi", field):
             for start in range(len(tokens)):
