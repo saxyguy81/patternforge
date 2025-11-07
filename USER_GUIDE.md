@@ -242,19 +242,21 @@ print(solution.raw_expr)  # *debug*
 Tokenization controls how patterns are generated from your data. It doesn't affect matching (patterns still use wildcard rules), only candidate generation.
 
 #### splitmethod='classchange' (Default)
-Splits on character class changes:
-- `SRAMController_512x64` → `[sram, controller, 512, 64]`
+Splits on character class changes (alpha, digit, other):
+- `SRAMController_512x64` → `[sram, controller, 512, x, 64]`
 - `chip/cpu/core0` → `[chip, cpu, core, 0]`
 
 #### splitmethod='char'
-Splits on specific characters (`/`, `_`, `-`):
-- `chip/cpu/core0` → `[chip, cpu, core0]`
+Splits into individual characters:
+- `chip/cpu/core0` → `[c, h, i, p, /, c, p, u, /, c, o, r, e, 0]`
+- Useful for finding character-level patterns
+- Automatically uses `min_token_len=1` (ignores global `min_token_len` setting)
 
 ```python
-# Use classchange for CamelCase, numbers
+# Use classchange for CamelCase, numbers (RECOMMENDED)
 solution = propose_solution(include, exclude, splitmethod='classchange')
 
-# Use char for paths with meaningful segments
+# Use char for character-level patterns (advanced use)
 solution = propose_solution(include, exclude, splitmethod='char')
 ```
 
@@ -513,9 +515,10 @@ These affect the cost function used during greedy selection:
 
 **splitmethod**: str or dict (default: "classchange")
 - Tokenization method
-- `"classchange"`: Split on character class changes (CamelCase, numbers)
-- `"char"`: Split on delimiters (`/`, `_`, `-`)
+- `"classchange"`: Split on character class changes (alpha/digit/other) - RECOMMENDED
+- `"char"`: Split into individual characters (advanced - for character-level patterns)
 - Can be per-field: `{"instance": "char", "module": "classchange"}`
+- Note: `splitmethod='char'` automatically uses `min_token_len=1`
 
 **per_word_substrings**: int (default: 16)
 - Top N substrings per token to consider

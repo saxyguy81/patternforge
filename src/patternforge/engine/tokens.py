@@ -38,12 +38,17 @@ def _split_classchange(text: str) -> list[str]:
 
 def tokenize(text: str, splitmethod: str = "classchange", min_token_len: int = 3) -> list[Token]:
     if splitmethod == "char":
-        raw_tokens = [text]
+        # Split into individual characters
+        raw_tokens = list(text)
+        # For character-level splitting, min_token_len=1 makes most sense
+        # But still respect user override if explicitly set via custom tokenizer
+        effective_min_len = 1
     else:
         raw_tokens = _split_classchange(text)
+        effective_min_len = min_token_len
     tokens: list[Token] = []
     for index, token in enumerate(raw_tokens):
-        if len(token) >= min_token_len:
+        if len(token) >= effective_min_len:
             tokens.append(Token(token.lower(), index))
     return tokens
 
