@@ -138,8 +138,13 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
     max_fn = resolve_budget_limit(ctx.options.budgets.max_fn, len(ctx.include))
     max_patterns = resolve_budget_limit(ctx.options.budgets.max_patterns, len(ctx.include))
 
+    # Safety limit to prevent infinite loops (should never be hit in practice)
+    max_iterations = 100
+    iteration = 0
+
     changed = True
-    while changed:
+    while changed and iteration < max_iterations:
+        iteration += 1
         changed = False
         best_candidate: Candidate | None = None
         best_candidate_cost = best_cost
@@ -199,6 +204,10 @@ def _greedy_select(ctx: _Context, candidates: list[Candidate]) -> _Selection:
                 selection = trial
                 best_cost = trial_cost
                 changed = True
+
+                # Early termination: if we've covered all includes with no FP, we're done
+                if bitset.count_bits(selection.include_bits) == len(ctx.include) and bitset.count_bits(selection.exclude_bits) == 0:
+                    break
     return selection
 
 
