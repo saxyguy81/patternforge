@@ -1,0 +1,4 @@
+pd_sio/asio/asio_spis/rx_mem/u0/i0
+pd_sio/asio/asio_spis/rx_mem/u1/i0
+pd_sio/asio/asio_spis/tx_mem/u0/i0
+pd_sio/asio/asio_spis/tx_mem/u1/i0

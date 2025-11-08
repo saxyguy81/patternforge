@@ -1,0 +1,1 @@
+- make sure all your shell commands have timeouts on them (default to 2m) - remind yourself if there are certain commands we need to increase the default timeout

@@ -67,17 +67,18 @@ def select_algorithm(
             "explore_all_field_combinations": True,
         }
 
-    # Bounded algorithm for small-medium datasets
+    # Use SCALABLE algorithm for small-medium datasets (better generalization)
+    # BOUNDED algorithm had issues with exact-match explosion on small datasets
     if N < 1000 and F < 8:
         if effort == EffortLevel.HIGH:
-            return AlgorithmChoice.BOUNDED, {
-                "max_expressions_per_row": 100,
-                "max_total_expressions": 2000,
+            return AlgorithmChoice.SCALABLE, {
+                "max_patterns_per_field": 150,
+                "enable_multi_field": True,
             }
         else:  # MEDIUM
-            return AlgorithmChoice.BOUNDED, {
-                "max_expressions_per_row": 50,
-                "max_total_expressions": 1000,
+            return AlgorithmChoice.SCALABLE, {
+                "max_patterns_per_field": 100,
+                "enable_multi_field": True,
             }
 
     # Scalable algorithm for large datasets or high field count
