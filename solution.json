@@ -1,5 +1,0 @@
-EXPR: P1
-RAW:  pd_sio/asio/asio_spis/*
-COVERAGE: 4/4 include matched (FN=0), FP=0
-PATTERNS:
-  P1: pd_sio/asio/asio_spis/* (prefix)
