@@ -816,6 +816,11 @@ def propose_solution(
             expressions=base_solution.expressions,
         )
 
+    # Pattern refinement phase - always runs to maximize quality
+    # Attempts to simplify/merge patterns while maintaining 0 FP
+    from .refinement import refine_patterns
+    base_solution = refine_patterns(base_solution, include, exclude)
+
     if options.invert == InvertStrategy.NEVER:
         return base_solution
     if options.invert == InvertStrategy.ALWAYS or not base_solution.patterns:
