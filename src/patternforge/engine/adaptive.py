@@ -1,10 +1,12 @@
 """Adaptive algorithm selection and effort level management for structured solver.
 
 Selects the best algorithm based on dataset size (N, F) and user-specified effort level.
+
+After comprehensive performance analysis, SCALABLE algorithm is used for all cases
+(BOUNDED algorithm was removed due to inferior quality and performance).
 """
 from __future__ import annotations
 from enum import Enum
-from typing import Callable, Sequence
 
 
 class EffortLevel(str, Enum):
@@ -12,17 +14,20 @@ class EffortLevel(str, Enum):
 
     Higher effort = better quality solutions but slower.
     """
-    LOW = "low"           # Fast, minimal candidates, O(N)
-    MEDIUM = "medium"     # Balanced, adaptive selection, O(N log N)
-    HIGH = "high"         # Best quality, more candidates, O(N log N)
-    EXHAUSTIVE = "exhaustive"  # Try everything, O(N²) - small datasets only
+    LOW = "low"           # Fast, minimal candidates
+    MEDIUM = "medium"     # Balanced (default)
+    HIGH = "high"         # Best quality, more candidates
+    EXHAUSTIVE = "exhaustive"  # Try everything (future: small datasets only)
 
 
 class AlgorithmChoice(str, Enum):
-    """Which algorithm to use for structured solving."""
-    EXHAUSTIVE = "exhaustive"    # Row-centric, enumerate all expression combinations
-    BOUNDED = "bounded"           # Row-centric with caps on candidates
-    SCALABLE = "scalable"         # Pattern-centric, lazy multi-field construction
+    """Which algorithm to use for structured solving.
+
+    Note: BOUNDED algorithm was removed after performance analysis showed
+    SCALABLE to be 1.3-7.4x faster for typical datasets with equal or better quality.
+    """
+    SCALABLE = "scalable"         # Pattern-centric, O(F × P × N) - used for all cases
+    # EXHAUSTIVE = "exhaustive"   # Future: Row-centric for tiny datasets with effort=exhaustive
 
 
 def select_algorithm(
@@ -43,51 +48,31 @@ def select_algorithm(
     Returns:
         (algorithm_choice, config_params)
 
-    Decision matrix:
-        N < 100, F < 5, effort=exhaustive → EXHAUSTIVE (try all combinations)
-        N < 1k, F < 8, effort≥medium      → BOUNDED (row-centric with caps)
-        N ≥ 1k or F ≥ 8                   → SCALABLE (pattern-centric)
-        effort=low                         → SCALABLE (always fastest)
-    """
-    N = num_include
-    F = num_fields
+    Algorithm Selection:
+        After performance analysis (see PERFORMANCE_ANALYSIS.md), SCALABLE algorithm
+        is used for all cases. It provides:
+        - 1.3-7.4x faster performance for typical datasets (N<100)
+        - Equal or better quality (fewer patterns, 0 FP)
+        - Simpler codebase (single algorithm to maintain)
 
-    # Effort=low always uses fastest algorithm
+    Effort Level Controls:
+        - LOW: Fewer patterns per field, single-field only
+        - MEDIUM: Balanced (default)
+        - HIGH: More patterns per field, enables multi-field expressions
+        - EXHAUSTIVE: Reserved for future EXHAUSTIVE algorithm (tiny datasets)
+    """
+    # Adjust SCALABLE parameters based on effort level
     if effort == EffortLevel.LOW:
         return AlgorithmChoice.SCALABLE, {
-            "max_patterns_per_field": 20,
+            "max_patterns_per_field": 50,
             "enable_multi_field": False,  # Single-field only for speed
         }
-
-    # Exhaustive only for tiny datasets
-    if effort == EffortLevel.EXHAUSTIVE and N < 100 and F <= 4:
-        return AlgorithmChoice.EXHAUSTIVE, {
-            "max_expressions_per_row": 200,  # No cap
-            "max_total_expressions": 10000,
-            "explore_all_field_combinations": True,
-        }
-
-    # Use SCALABLE algorithm for small-medium datasets (better generalization)
-    # BOUNDED algorithm had issues with exact-match explosion on small datasets
-    if N < 1000 and F < 8:
-        if effort == EffortLevel.HIGH:
-            return AlgorithmChoice.SCALABLE, {
-                "max_patterns_per_field": 150,
-                "enable_multi_field": True,
-            }
-        else:  # MEDIUM
-            return AlgorithmChoice.SCALABLE, {
-                "max_patterns_per_field": 100,
-                "enable_multi_field": True,
-            }
-
-    # Scalable algorithm for large datasets or high field count
-    if effort == EffortLevel.HIGH:
+    elif effort == EffortLevel.HIGH or effort == EffortLevel.EXHAUSTIVE:
         return AlgorithmChoice.SCALABLE, {
             "max_patterns_per_field": 200,
             "enable_multi_field": True,
         }
-    else:  # MEDIUM
+    else:  # MEDIUM (default)
         return AlgorithmChoice.SCALABLE, {
             "max_patterns_per_field": 100,
             "enable_multi_field": True,

@@ -982,7 +982,7 @@ def propose_solution_structured(
         ))
 
     # Adaptive algorithm selection based on N, F, and effort
-    from .adaptive import select_algorithm, get_effort_from_string, AlgorithmChoice
+    from .adaptive import select_algorithm, get_effort_from_string
 
     effort_level = get_effort_from_string(options.effort)
     algorithm, config = select_algorithm(
@@ -992,27 +992,16 @@ def propose_solution_structured(
         effort=effort_level
     )
 
-    # Route to appropriate algorithm
-    if algorithm == AlgorithmChoice.SCALABLE:
-        # Pattern-centric scalable solver for large datasets
-        return _propose_solution_structured_scalable(
-            include_rows,
-            exclude_rows,
-            fields,
-            field_getter or _default_field_getter,
-            options,
-            config
-        )
-    else:
-        # Bounded or exhaustive: use expression-based solver
-        return _propose_solution_structured_bounded(
-            include_rows,
-            exclude_rows,
-            options,
-            token_iter=token_iter,
-            field_getter=field_getter,
-            config=config
-        )
+    # Use SCALABLE algorithm (only algorithm after performance analysis)
+    # BOUNDED was removed - see PERFORMANCE_ANALYSIS.md for details
+    return _propose_solution_structured_scalable(
+        include_rows,
+        exclude_rows,
+        fields,
+        field_getter or _default_field_getter,
+        options,
+        config
+    )
 
 
 def _propose_solution_structured_scalable(
@@ -1137,198 +1126,6 @@ def _propose_solution_structured_scalable(
             "mode": options.mode.value,
             "splitmethod": options.splitmethod,
             "algorithm": "scalable",
-        },
-        patterns=patterns,
-        metrics=metrics,
-        witnesses=witnesses,
-        expressions=expressions_oumatchesut,
-    )
-
-
-def _propose_solution_structured_bounded(
-    include_rows: Sequence[object],
-    exclude_rows: Sequence[object],
-    options: SolveOptions,
-    token_iter: list[tuple] | None = None,
-    field_getter: callable | None = None,
-    config: dict | None = None,
-) -> dict[str, object]:
-    """
-    Bounded expression-based implementation for small-medium datasets.
-    O(N) with capped candidates.
-    """
-    from .structured_expressions import (
-        generate_structured_expression_candidates,
-        greedy_select_structured_expressions,
-    )
-    from .utils import resolve_budget_limit
-
-    # Determine field names
-    if include_rows and isinstance(include_rows[0], dict):
-        field_names = list(include_rows[0].keys())
-    else:
-        # Infer from token_iter
-        field_names = list(set(field for _, _, field in (token_iter or [])))
-
-    # Use default field_getter if not provided
-    if field_getter is None:
-        field_getter = _default_field_getter
-
-    # Generate per-field patterns for each row
-    from .candidates import generate_candidates
-
-    field_patterns = {}  # (row_idx, field_name) -> list of patterns
-
-    for row_idx, row in enumerate(include_rows):
-        for field_name in field_names:
-            # Get field value
-            value = field_getter(row, field_name)
-            if not value:
-                continue
-
-            # Generate patterns for this field value
-            # Use a simplified token approach for per-field pattern generation
-            from .tokens import tokenize
-
-            tokens = tokenize(value, splitmethod=options.splitmethod, min_token_len=options.min_token_len)
-
-            patterns = []
-
-            # Exact pattern
-            patterns.append(value.lower())
-
-            # Token-based patterns
-            for token in tokens:
-                # Substring
-                patterns.append(f"*{token.value}*")
-
-            # Prefix
-            if tokens:
-                patterns.append(f"{tokens[0].value}/*")
-
-            # Suffix
-            if tokens:
-                patterns.append(f"*/{tokens[-1].value}")
-
-            # Multi-segment
-            if len(tokens) >= 2:
-                for i in range(len(tokens)):
-                    for j in range(i + 1, min(i + 3, len(tokens))):
-                        segment = [t.value for t in tokens[i:j + 1]]
-                        patterns.append("*" + "*".join(segment) + "*")
-
-            field_patterns[(row_idx, field_name)] = patterns
-
-    # Generate expression candidates
-    expression_candidates = generate_structured_expression_candidates(
-        include_rows=include_rows,
-        exclude_rows=exclude_rows,
-        field_names=field_names,
-        field_patterns=field_patterns,
-        field_getter=field_getter,
-        field_weights=options.weights.w_field,
-        max_expressions_per_row=50,
-    )
-
-    # Greedy select terms
-    max_fp = resolve_budget_limit(options.budgets.max_fp, len(include_rows))
-    if max_fp is None:
-        max_fp = 0  # Default to zero FP for structured
-    selected_expressions = greedy_select_structured_expressions(
-        expressions=expression_candidates,
-        num_include=len(include_rows),
-        num_exclude=len(exclude_rows),
-        max_fp=max_fp,
-    )
-
-    # Build solution from selected terms
-    from .models import Pattern, Solution
-    from . import bitset
-
-    # Convert terms to solution format
-    patterns = []
-    expressions_oumatchesut = []
-
-    for expression_idx, expression in enumerate(selected_expressions, 1):
-        # Create expression dict
-        term_dict = {
-            "expr": f"T{expression_idx}",
-            "raw_expr": " & ".join(f"({field}: {pat})" for field, pat in expression.fields.items() if pat != "*"),
-            "fields": {k: v for k, v in expression.fields.items() if v != "*"},
-            "matches": bitset.count_bits(expression.include_mask),
-            "fp": bitset.count_bits(expression.exclude_mask),
-            "fn": len(include_rows) - bitset.count_bits(expression.include_mask),
-        }
-        expressions_oumatchesut.append(term_dict)
-
-        # Create patterns for each field pattern in expression
-        for field_name, pattern in expression.fields.items():
-            if pattern == "*":
-                continue  # Skip wildcard fields
-            pattern = Pattern(
-                id=f"T{expression_idx}_{field_name}",
-                text=pattern,
-                kind="structured",
-                wildcards=pattern.count("*"),
-                length=len(pattern),
-                field=field_name,
-            )
-            patterns.append(pattern)
-
-    # Compute final metrics
-    covered_mask = 0
-    fp_mask = 0
-    for expression in selected_expressions:
-        covered_mask |= expression.include_mask
-        fp_mask |= expression.exclude_mask
-
-    metrics = {
-        "covered": bitset.count_bits(covered_mask),
-        "total_positive": len(include_rows),
-        "fp": bitset.count_bits(fp_mask),
-        "fn": len(include_rows) - bitset.count_bits(covered_mask),
-        "patterns": len(patterns),
-        "terms": len(expressions_oumatchesut),
-        "boolean_ops": max(0, len(expressions_oumatchesut) - 1),  # Number of OR operations
-        "wildcards": sum(a.wildcards for a in patterns),
-        "pattern_chars": sum(a.length for a in patterns),
-    }
-
-    # Build expression
-    if expressions_oumatchesut:
-        expr_parts = []
-        for term_dict in expressions_oumatchesut:
-            field_parts = [f"({field}: {pat})" for field, pat in term_dict["fields"].items()]
-            expr_parts.append(" & ".join(field_parts))
-        expr_text = " | ".join(f"({part})" for part in expr_parts)
-    else:
-        expr_text = "FALSE"
-
-    # Canonicalize for witnesses
-    def canon(row):
-        if isinstance(row, dict):
-            return "/".join(str(v) for v in row.values() if v)
-        return str(row)
-
-    include_strs = [canon(r) for r in include_rows]
-    exclude_strs = [canon(r) for r in exclude_rows]
-
-    witnesses = {
-        "matches_examples": [include_strs[i] for i in range(len(include_rows)) if (covered_mask >> i) & 1][:3],
-        "fp_examples": [exclude_strs[i] for i in range(len(exclude_rows)) if (fp_mask >> i) & 1][:3],
-        "fn_examples": [include_strs[i] for i in range(len(include_rows)) if not ((covered_mask >> i) & 1)][:3],
-    }
-
-    return Solution(
-        expr=expr_text,
-        raw_expr=expr_text,
-        global_inverted=False,
-        term_method="structured",
-        mode=options.mode.value,
-        options={
-            "mode": options.mode.value,
-            "splitmethod": options.splitmethod,
-            "min_token_len": options.min_token_len,
         },
         patterns=patterns,
         metrics=metrics,
